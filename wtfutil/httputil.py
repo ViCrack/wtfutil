@@ -2,6 +2,7 @@ import functools
 import ipaddress
 import json
 import os
+import random
 import socket
 import ssl
 import threading
@@ -10,6 +11,7 @@ import re
 from concurrent import futures
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
+from io import BytesIO
 from socket import gethostbyname
 from typing import Callable, List, Generator, Tuple, Optional
 from urllib.parse import urljoin

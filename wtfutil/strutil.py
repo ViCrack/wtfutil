@@ -154,8 +154,8 @@ def uuencode(binary_data):
     """
     类似java中的UUEncoder实现
     """
-    if isinstance(value, str):
-        value = value.encode('utf-8')
+    if isinstance(binary_data, str):
+        value = binary_data.encode('utf-8')
     # 分块将二进制数据进行 uuencode 编码
     chunk_size = 45
     # At most 45 bytes at once

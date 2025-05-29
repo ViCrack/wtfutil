@@ -11,7 +11,7 @@ import sys
 from shutil import rmtree
 
 __author__ = 'vicrack'
-__version__ = '1.2.4'
+__version__ = '1.2.5'
 __contact__ = '18179821+ViCrack@users.noreply.github.com'
 __url__ = 'https://github.com/vicrack'
 __license__ = "GPL-3.0-or-later"
