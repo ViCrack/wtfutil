@@ -13,7 +13,7 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from io import BytesIO
 from socket import gethostbyname
-from typing import Callable, List, Generator, Tuple, Optional
+from typing import Callable, List, Generator, Tuple, Optional, Union, Dict, Any
 from urllib.parse import urljoin
 from urllib.parse import urlparse
 
@@ -60,6 +60,7 @@ def patch_getproxies():
     # https://www.cnblogs.com/davyyy/p/14388623.html
     if os.name == 'nt':
         import urllib.request
+
         old_getproxies_registry = urllib.request.getproxies_registry
 
         def hook():
@@ -105,7 +106,7 @@ class RequestsSession(requests.Session):
         pre_send_hooks (List[Callable]): 在 send 阶段执行的 hook 列表
     """
 
-    def __init__(self, debug: bool = False, rate_limit: int | None = None):
+    def __init__(self, debug: bool = False, rate_limit: Optional[int] = None):
         super().__init__()
         self._debug = debug
         if rate_limit is not None and rate_limit <= 0:
@@ -239,16 +240,12 @@ class BaseUrlSession(RequestsSession):
     def request(self, method, url, *args, **kwargs):
         """Send the request after generating the complete URL."""
         url = self.create_url(url)
-        return super().request(
-            method, url, *args, **kwargs
-        )
+        return super().request(method, url, *args, **kwargs)
 
     def prepare_request(self, request, *args, **kwargs):
         """Prepare the request after generating the complete URL."""
         request.url = self.create_url(request.url)
-        return super().prepare_request(
-            request, *args, **kwargs
-        )
+        return super().prepare_request(request, *args, **kwargs)
 
     def create_url(self, url):
         """Create the URL based off this partial path."""
@@ -258,7 +255,7 @@ class BaseUrlSession(RequestsSession):
 class CustomSslContextHttpAdapter(HTTPAdapter):
     # https://github.com/urllib3/urllib3/issues/2653
     # openssl 3.0 bug --> (Caused by SSLError(SSLError(1, '[SSL: UNSAFE_LEGACY_RENEGOTIATION_DISABLED] unsafe legacy renegotiation disabled (_ssl.c:1006)')))
-    """"Transport adapter" that allows us to use a custom ssl context object with the requests."""
+    """ "Transport adapter" that allows us to use a custom ssl context object with the requests."""
 
     def init_poolmanager(self, connections, maxsize, block=False):
         ctx = create_urllib3_context()
@@ -282,6 +279,7 @@ class ChunkedConfig:
     Raises:
         ValueError: 如果配置参数不合法（例如 min > max 或负值）。
     """
+
     chunk_size_range: Optional[Tuple[int, int]] = None
     delay_range: Optional[Tuple[float, float]] = None
     comment_length_range: Optional[Tuple[int, int]] = None
@@ -293,19 +291,55 @@ class ChunkedConfig:
         if self.chunk_size_range is None:
             self.chunk_size_range = (3, 10)
         if self.keywords is None:
-            self.keywords = [s.lower().encode() for s in [
-                # 文件类型
-                'asp', 'jsp', 'php', 'aspx',
-                # SQL Injection
-                'select', 'union', 'insert', 'update', 'delete', 'drop', 'truncate',
-                'from', 'where', 'having', 'order', 'group',
-                'sleep', 'benchmark', 'information_schema', 'database',
-                # 文件操作
-                'load_file', 'outfile', 'filename', 'dumpfile', 'form-data', 'name', 'position', 'upload', 'content',
-                # XSS / 特殊标签
-                'script', 'iframe', 'img', 'onerror', 'onload',
-                'eval', 'assert', 'system', 'exec', 'java', 'runtime'
-            ]]
+            self.keywords = [
+                s.lower().encode()
+                for s in [
+                    # 文件类型
+                    'asp',
+                    'jsp',
+                    'php',
+                    'aspx',
+                    # SQL Injection
+                    'select',
+                    'union',
+                    'insert',
+                    'update',
+                    'delete',
+                    'drop',
+                    'truncate',
+                    'from',
+                    'where',
+                    'having',
+                    'order',
+                    'group',
+                    'sleep',
+                    'benchmark',
+                    'information_schema',
+                    'database',
+                    # 文件操作
+                    'load_file',
+                    'outfile',
+                    'filename',
+                    'dumpfile',
+                    'form-data',
+                    'name',
+                    'position',
+                    'upload',
+                    'content',
+                    # XSS / 特殊标签
+                    'script',
+                    'iframe',
+                    'img',
+                    'onerror',
+                    'onload',
+                    'eval',
+                    'assert',
+                    'system',
+                    'exec',
+                    'java',
+                    'runtime',
+                ]
+            ]
 
         # 验证 chunk_size_range
         if not (isinstance(self.chunk_size_range, tuple) and len(self.chunk_size_range) == 2):
@@ -345,22 +379,12 @@ class ChunkedConfig:
     @classmethod
     def default(cls) -> 'ChunkedConfig':
         """返回默认的分块配置"""
-        return cls(
-            chunk_size_range=(3, 10),
-            delay_range=None,
-            comment_length_range=None,
-            keywords=None
-        )
+        return cls(chunk_size_range=(3, 10), delay_range=None, comment_length_range=None, keywords=None)
 
     @classmethod
     def aggressive(cls) -> 'ChunkedConfig':
         """返回更激进的分块配置（小块、短延迟、随机注释）"""
-        return cls(
-            chunk_size_range=(3, 10),
-            delay_range=(0.1, 0.8),
-            comment_length_range=(0, 50),
-            keywords=None
-        )
+        return cls(chunk_size_range=(3, 10), delay_range=(0.1, 0.8), comment_length_range=(0, 50), keywords=None)
 
 
 # 保存原始 request 与 send 方法
@@ -388,9 +412,8 @@ def custom_urllib3_send(self, data: bytes):
     if getattr(self, "_custom_chunked", False) and data != b"0\r\n\r\n":
         chunked_config: Optional[ChunkedConfig] = getattr(_http_context, "chunked_config", None)
         if chunked_config and chunked_config.comment_length_range:
-
             # 匹配 chunked 数据格式
-            pattern = re.compile(br'^([0-9A-Fa-f]+)\r\n(.*)\r\n$', re.DOTALL)
+            pattern = re.compile(rb'^([0-9A-Fa-f]+)\r\n(.*)\r\n$', re.DOTALL)
             match = pattern.match(data)
             if match:
                 header = match.group(1)  # 十六进制长度部分
@@ -516,18 +539,18 @@ class ChunkedAdapter(HTTPAdapter):
 
 
 def requests_session(
-        proxies: dict[str, str] | int | None = False,
-        timeout: float | None = None,
-        debug: bool = False,
-        base_url: str | None = None,
-        user_agent: str | None = None,
-        use_cache: bool | dict[str, any] | None = None,
-        fake_ip: bool = False,
-        rate_limit: int | None = None,
-        chunked: bool | ChunkedConfig = False,
-        max_retries: int = requests.adapters.DEFAULT_RETRIES,
-        pool_connections: int = requests.adapters.DEFAULT_POOLSIZE,
-        pool_maxsize: int = requests.adapters.DEFAULT_POOLSIZE
+    proxies: Union[Dict[str, str], int, None] = False,
+    timeout: Optional[float] = None,
+    debug: bool = False,
+    base_url: Optional[str] = None,
+    user_agent: Optional[str] = None,
+    use_cache: Union[bool, Dict[str, Any], None] = None,
+    fake_ip: bool = False,
+    rate_limit: Optional[int] = None,
+    chunked: Union[bool, ChunkedConfig] = False,
+    max_retries: int = requests.adapters.DEFAULT_RETRIES,
+    pool_connections: int = requests.adapters.DEFAULT_POOLSIZE,
+    pool_maxsize: int = requests.adapters.DEFAULT_POOLSIZE,
 ) -> RequestsSession:
     """
     创建并返回一个增强的 requests session。
@@ -542,8 +565,7 @@ def requests_session(
         use_cache: 是否启用缓存，或缓存配置字典。默认 None。
         fake_ip: 是否添加伪造的 X-Forwarded-For IP。默认 False。
         rate_limit: 每秒最大请求数。默认 None。
-        chunked: 是否启用分块传输，可以是 bool 或 ChunkedConfig 对象。
-                 如果为 True，使用默认配置；如果为 ChunkedConfig，使用自定义配置。
+        chunked: 是否启用分块传输，可以是 bool 或 ChunkedConfig 对象。如果为 True，使用默认配置；如果为 ChunkedConfig，使用自定义配置。
         pool_connections: 连接池最大连接数。默认 10。
         pool_maxsize: 连接池最大连接数。默认 10。
 
@@ -554,32 +576,43 @@ def requests_session(
         TypeError: 如果 proxies 类型无效。
     """
     if use_cache:
-        if use_cache:
-            session = CachedSession()
-        else:
+        if isinstance(use_cache, dict):
             session = CachedSession(**use_cache)
+        else:
+            session = CachedSession()
     elif base_url:
         session = BaseUrlSession(base_url, debug=debug, rate_limit=rate_limit)
     else:
         session = RequestsSession(debug=debug, rate_limit=rate_limit)
 
     ua = UserAgent()
-    session.headers.update({
-        'Upgrade-Insecure-Requests': '1',
-        'Pragma': 'no-cache',
-        'Cache-Control': 'no-cache',
-        'User-Agent': user_agent or ua.random,
-    })
+    session.headers.update(
+        {
+            'Upgrade-Insecure-Requests': '1',
+            'Pragma': 'no-cache',
+            'Cache-Control': 'no-cache',
+            'User-Agent': user_agent or ua.random,
+        }
+    )
     if fake_ip:
         if isinstance(fake_ip, bool):
             fake = faker.Faker('zh_CN')
             fake_ip = fake.ipv4()
-        session.headers.update({
-            'X-Forwarded-For': fake_ip,
-        })
+        session.headers.update(
+            {
+                'X-Forwarded-For': fake_ip,
+            }
+        )
     session.verify = False
-    session.mount('http://', HTTPAdapter(max_retries=max_retries, pool_connections=pool_connections, pool_maxsize=pool_maxsize))
-    session.mount('https://', CustomSslContextHttpAdapter(max_retries=max_retries, pool_connections=pool_connections, pool_maxsize=pool_maxsize))
+    session.mount(
+        'http://', HTTPAdapter(max_retries=max_retries, pool_connections=pool_connections, pool_maxsize=pool_maxsize)
+    )
+    session.mount(
+        'https://',
+        CustomSslContextHttpAdapter(
+            max_retries=max_retries, pool_connections=pool_connections, pool_maxsize=pool_maxsize
+        ),
+    )
 
     if chunked:
         if isinstance(chunked, bool) and chunked:
@@ -589,7 +622,13 @@ def requests_session(
         else:
             raise TypeError("chunked must be bool or ChunkedConfig")
 
-        adapter = ChunkedAdapter(chunked_config=chunked_config, debug=debug, max_retries=max_retries, pool_connections=pool_connections, pool_maxsize=pool_maxsize)
+        adapter = ChunkedAdapter(
+            chunked_config=chunked_config,
+            debug=debug,
+            max_retries=max_retries,
+            pool_connections=pool_connections,
+            pool_maxsize=pool_maxsize,
+        )
         session.mount('http://', adapter)
         session.mount('https://', adapter)
 
@@ -600,7 +639,7 @@ def requests_session(
         if isinstance(proxies, dict):
             session.proxies = proxies
         elif isinstance(proxies, str):
-            session.proxies = {"http":proxies, "https": proxies}
+            session.proxies = {"http": proxies, "https": proxies}
         elif isinstance(proxies, int):
             session.proxies = {"http": "http://127.0.0.1:" + str(proxies), "https": "http://127.0.0.1:" + str(proxies)}
         else:
@@ -661,7 +700,7 @@ def httpraw(raw: str, ssl: bool = False, **kwargs) -> requests.Response:
     raws = list(map(lambda x: x.strip(), raw.splitlines()))
     try:
         method, path, protocol = raws[0].split(" ")
-    except Exception:
+    except (ValueError, IndexError):
         raise ValueError("Invalid protocol format: first line must be 'METHOD PATH PROTOCOL'")
     post = None
     _json = None
@@ -673,7 +712,7 @@ def httpraw(raw: str, ssl: bool = False, **kwargs) -> requests.Response:
                 break
         if len(raws) == index:
             raise Exception("Invalid protocol format: no post data")
-        tmp_headers = raws[1:index - 1]
+        tmp_headers = raws[1 : index - 1]
         tmp_headers = extract_dict('\n'.join(tmp_headers), '\n', ": ")
         postData = '\r\n'.join(raws[index:])
         try:
@@ -733,12 +772,12 @@ def is_wildcard_dns(domain):
     判断域名是否有泛解析
     """
     import dns
+
     nonexistent_domain = rand_base(8) + '.' + domain
     try:
-        answers = dns.resolver.resolve(nonexistent_domain, 'A')
-        ip_list = [j for i in answers.response.answer for j in i.items]
+        dns.resolver.resolve(nonexistent_domain, 'A')
         return True
-    except Exception as e:
+    except Exception:
         return False
 
 
@@ -747,7 +786,7 @@ def is_valid_ip(ip: str) -> bool:
     判断是否是有效的IP地址，支持IPv4Address、IPv6Address
     """
     try:
-        ip_address = ipaddress.ip_address(ip)
+        ipaddress.ip_address(ip)
         return True
     except ValueError:
         return False
@@ -760,7 +799,6 @@ def is_wildcard_dns_batch(domain_list: iter, thread_num: int = 10, show_progress
     """
     result = {}
     with ThreadPoolExecutor(max_workers=thread_num) as executor:
-
         future_map = {}
         for domain in domain_list:
             if domain.startswith(('http://', 'https://')):
@@ -819,16 +857,16 @@ def is_port_in_use(port: int) -> bool:
         return s.connect_ex(('localhost', port)) == 0
 
 
-def get_base_url(url: str) -> str | None:
+def get_base_url(url: str) -> Optional[str]:
     """
     从任意 URL 中提取 base URL（协议 + 域名）。
-    
+
     参数:
         url (str): 输入的完整 URL 字符串
-    
+
     返回:
         str | None: 提取出的 base URL（例如 https://example.com），若失败则返回 None
-    
+
     异常:
         TypeError: 如果输入的 url 不是字符串类型
     """
@@ -842,9 +880,10 @@ def get_base_url(url: str) -> str | None:
         # 移除路径、查询参数和片段，仅保留协议和域名部分，然后重新生成 URL
         base_url = parsed._replace(path="", query="", fragment="").geturl()
         return base_url
-    except Exception:
+    except (ValueError, AttributeError):
         # 如果 URL 无效或解析失败，返回 None（可根据需求改为抛出异常）
         return None
+
 
 def build_absolute_url(base_url: str, relative_url: str) -> str:
     """
@@ -904,9 +943,9 @@ __all__ = [
     'url2ip',
     'is_port_in_use',
     'get_base_url',
+    'build_absolute_url',
     'httpraw',
     'requests_session',
-
     # --- 类 ---
     'EnhancedResponse',
     'RequestsSession',
