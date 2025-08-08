@@ -846,6 +846,48 @@ def get_base_url(url: str) -> str | None:
         # 如果 URL 无效或解析失败，返回 None（可根据需求改为抛出异常）
         return None
 
+def build_absolute_url(base_url: str, relative_url: str) -> str:
+    """
+    将相对URL转换为绝对URL
+
+    Args:
+        base_url (str): 基础URL（当前页面URL）
+        relative_url (str): 相对URL或绝对URL
+
+    Returns:
+        str: 绝对URL
+    """
+    if not relative_url or not relative_url.strip():
+        return base_url
+
+    relative_url = relative_url.strip()
+
+    # 如果是省略协议的URL（//开头）
+    if relative_url.startswith("//"):
+        parsed = urlparse(base_url)
+        return f"{parsed.scheme}:{relative_url}"
+
+    # 如果是完整的URL（包含协议）
+    elif "://" in relative_url:
+        return relative_url
+
+    # 如果是绝对路径（以/开头）
+    elif relative_url.startswith("/"):
+        parsed = urlparse(base_url)
+        return f"{parsed.scheme}://{parsed.netloc}{relative_url}"
+
+    # 如果是query参数（?开头）
+    elif relative_url.startswith("?"):
+        return base_url + relative_url
+
+    # 如果是anchor（#开头）
+    elif relative_url.startswith("#"):
+        return base_url + relative_url
+
+    # 如果是相对路径（其他情况）
+    else:
+        return urljoin(base_url, relative_url)
+
 
 __all__ = [
     # --- 函数 ---
