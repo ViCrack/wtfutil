@@ -1,0 +1,39 @@
+---
+description:
+globs:
+alwaysApply: false
+---
+# wtfutil 项目结构与模块说明
+
+本规则基于 [README.md](mdc:README.md) 和仓库源文件，帮助理解 wtfutil 的主要结构和各模块用途。
+
+## 主要入口
+- 推荐通过 `from wtfutil import util` 一次性导入所有常用工具。
+- 也可按需分别导入子模块，如 `from wtfutil import fileutil`、`httputil` 等。
+
+## 主要模块及功能
+- [wtfutil/util.py](mdc:wtfutil/util.py)：
+  - 汇总并重导出各子模块的常用函数，是最常用的入口。
+  - 提供 requests 优化、文件读写、字符串处理、加解密、数据库、通知、翻译、单例、时间测量、唯一队列等工具。
+- [wtfutil/httputil.py](mdc:wtfutil/httputil.py)：
+  - HTTP 请求相关工具，支持代理、重试、超时、原始 HTTP 请求等。
+- [wtfutil/fileutil.py](mdc:wtfutil/fileutil.py)：
+  - 文件读写、哈希计算、JAR 文件分析等。
+- [wtfutil/strutil.py](mdc:wtfutil/strutil.py)：
+  - 字符串编码/解码、哈希、加解密、文本处理等。
+- [wtfutil/sqlutil.py](mdc:wtfutil/sqlutil.py)：
+  - SQLite/MySQL 数据库操作，线程安全。
+- [wtfutil/notifyutil.py](mdc:wtfutil/notifyutil.py)：
+  - 多渠道通知（如 Bark、钉钉、Telegram、SMTP 等）。
+- [wtfutil/translateutil.py](mdc:wtfutil/translateutil.py)：
+  - 百度翻译 API 封装。
+- [wtfutil/singleinstance.py](mdc:wtfutil/singleinstance.py)：
+  - 单实例运行工具，防止脚本多开。
+
+## 配置与环境
+- 通知服务可通过 `wtfconfig.ini` 或环境变量配置，环境变量优先生效。
+- 详见 [README.md](mdc:README.md) 配置示例。
+
+## 示例用法
+- 详见 [README.md](mdc:README.md) 的 Usage Examples 部分，涵盖 HTTP、文件、字符串、数据库、通知、翻译、单例、通用工具等。
+
