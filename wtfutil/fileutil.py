@@ -95,18 +95,60 @@ def read_lines(filepath: Union[Path, str], encoding='utf-8', not_exists_ok: bool
     return lines
 
 
-def write_text(filepath: Union[Path, str], content, mode='w', encoding='utf-8'):
+def write_text(filepath: Union[Path, str], content, mode='w', encoding='utf-8', newline=''):
+    """
+    写入文本内容到文件
+
+    Args:
+        filepath: 文件路径
+        content: 要写入的内容
+        mode: 文件打开模式，默认 'w'
+        encoding: 文件编码，默认 'utf-8'
+        newline: 换行符处理方式，默认 ''（不自动转换）
+                - '': 不进行换行符转换（推荐，保持原始内容）
+                - None: 启用平台相关的换行符转换（Windows: \n→\r\n）
+                - '\n': 强制使用 LF（Unix/Linux 风格）
+                - '\r\n': 强制使用 CRLF（Windows 风格）
+                - '\r': 强制使用 CR（旧 Mac 风格）
+
+    注意：
+        - 默认 newline='' 不会自动转换换行符，保持内容原样
+        - 如需平台相关的换行符转换，使用 newline=None
+        - 二进制模式 ('wb') 下 newline 参数无效
+    """
     if isinstance(filepath, Path):
         filepath = str(filepath)
     if mode == 'wb':
         encoding = None
+        newline = None  # 二进制模式下 newline 无效
     if content is None:
         raise ValueError('content must not be None')
-    with open(filepath, mode, encoding=encoding) as f:
+    with open(filepath, mode, encoding=encoding, newline=newline) as f:
         f.write(content)
 
 
-def write_lines(filepath: Union[Path, str], lines, mode='w', encoding='utf-8', unique: bool = False):
+def write_lines(filepath: Union[Path, str], lines, mode='w', encoding='utf-8', unique: bool = False, newline=''):
+    """
+    按行写入文本内容到文件
+
+    Args:
+        filepath: 文件路径
+        lines: 要写入的行列表
+        mode: 文件打开模式，默认 'w'
+        encoding: 文件编码，默认 'utf-8'
+        unique: 是否去重，默认 False
+        newline: 换行符处理方式，默认 ''（不自动转换）
+                - '': 不进行换行符转换（推荐，保持原始内容）
+                - None: 启用平台相关的换行符转换（Windows: \n→\r\n）
+                - '\n': 强制使用 LF（Unix/Linux 风格）
+                - '\r\n': 强制使用 CRLF（Windows 风格）
+                - '\r': 强制使用 CR（旧 Mac 风格）
+
+    注意：
+        - 默认 newline='' 不会自动转换换行符，每行末尾添加 '\n'
+        - 如需平台相关的换行符转换，使用 newline=None
+        - 函数会在每行末尾添加 '\n'，实际写入的换行符取决于 newline 参数
+    """
     if isinstance(filepath, Path):
         filepath = str(filepath)
     if lines is None:
@@ -115,9 +157,9 @@ def write_lines(filepath: Union[Path, str], lines, mode='w', encoding='utf-8', u
         # 去重并且保持原本顺序
         lines = list(dict.fromkeys(lines))
 
-    with open(filepath, mode, encoding=encoding) as f:
-        for l in lines:
-            f.write(l + '\n')
+    with open(filepath, mode, encoding=encoding, newline=newline) as f:
+        for line in lines:
+            f.write(line + '\n')
 
 
 def write_json(filepath: Union[Path, str], json_obj: dict, encoding='utf-8'):
