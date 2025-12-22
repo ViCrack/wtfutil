@@ -8,6 +8,7 @@
 from .fileutil import *
 from .httputil import *
 from .notifyutil import *
+from .procutil import *
 from .sqlutil import *
 from .strutil import *
 from .translateutil import *
@@ -19,6 +20,7 @@ __all__ = (
     fileutil.__all__ +
     httputil.__all__ +
     notifyutil.__all__ +
+    procutil.__all__ +
     sqlutil.__all__ +
     strutil.__all__ +
     translateutil.__all__ +
