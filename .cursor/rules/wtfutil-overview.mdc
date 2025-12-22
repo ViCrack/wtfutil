@@ -23,6 +23,9 @@ alwaysApply: false
   - 字符串编码/解码、哈希、加解密、文本处理等。
 - [wtfutil/sqlutil.py](mdc:wtfutil/sqlutil.py)：
   - SQLite/MySQL 数据库操作，线程安全。
+- [wtfutil/procutil.py](mdc:wtfutil/procutil.py)：
+  - 进程管理工具，支持挂起和恢复进程（Windows 平台）。
+  - 提供根据进程名称或 PID 查找、挂起、恢复进程的功能。
 - [wtfutil/notifyutil.py](mdc:wtfutil/notifyutil.py)：
   - 多渠道通知（如 Bark、钉钉、Telegram、SMTP 等）。
 - [wtfutil/translateutil.py](mdc:wtfutil/translateutil.py)：
@@ -35,5 +38,5 @@ alwaysApply: false
 - 详见 [README.md](mdc:README.md) 配置示例。
 
 ## 示例用法
-- 详见 [README.md](mdc:README.md) 的 Usage Examples 部分，涵盖 HTTP、文件、字符串、数据库、通知、翻译、单例、通用工具等。
+- 详见 [README.md](mdc:README.md) 的 Usage Examples 部分，涵盖 HTTP、文件、字符串、数据库、进程管理、通知、翻译、单例、通用工具等。
 

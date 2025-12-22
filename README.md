@@ -33,6 +33,7 @@ Ensure you have Python 3.6 or higher installed, as the library leverages modern 
 -   **File Utilities (`fileutil`)** : Simplified file I/O, hash computation, and JAR file analysis.
 -   **String Utilities (`strutil`)** : Encoding/decoding, hashing, encryption, and text manipulation.
 -   **Database Utilities (`sqlutil`)** : CRUD operations for SQLite and MySQL with thread-safe connections.
+-   **Process Utilities (`procutil`)** : Process management utilities for suspending and resuming processes on Windows.
 -   **Notification Utilities (`notifyutil`)** : Multi-channel notifications (e.g., Bark, DingTalk, Telegram).
 -   **Translation Utilities (`translateutil`)** : Integration with Baidu Translate API.
 -   **General Utilities**: Time measurement, unique data structures, and resource management.
@@ -273,6 +274,34 @@ translator = util.BaiduTranslateApi(appid='your_appid', appkey='your_appkey')
 result = translator.translate('你好', from_lang='zh', to_lang='en')  # 'Hello'
 ```
 
+### ☤ Process Utilities
+
+#### Process Management (Windows Only)
+
+Suspend and resume processes by name or PID:
+
+```python
+from wtfutil import util
+
+# Find process by name
+pid = util.find_process_by_name('notepad.exe')
+print(f"Process PID: {pid}")
+
+# Suspend a process by name
+util.suspend_process('notepad.exe')
+
+# Resume a process by name
+util.resume_process('notepad.exe')
+
+# Suspend a process by PID
+util.suspend_process_by_pid(1234)
+
+# Resume a process by PID
+util.resume_process_by_pid(1234)
+```
+
+**Note**: Process utilities require Windows OS and depend on `psutil` and `pywin32` libraries.
+
 ### ☤ Single Instance Utility
 
 `wtfutil.singleinstance` provides a lightweight way to ensure that only one instance of a script runs at any given time. This is useful for preventing concurrent executions in environments like crontab or scheduled tasks.
@@ -357,6 +386,7 @@ path = util.get_resource('config.txt')  # Resolves to absolute path
 
 * **HTTP utilities** : `from wtfutil import httputil`
 * **File utilities** : `from wtfutil import fileutil`
+* **Process utilities** : `from wtfutil import procutil`
 
 This keeps your code light and clear. Alternatively, import `util` for everything: `from wtfutil import util`.
 

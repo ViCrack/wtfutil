@@ -12,6 +12,7 @@ from .fileutil import *
 from .httputil import *
 from .strutil import *
 from .sqlutil import *
+from .procutil import *
 from .notifyutil import *
 from .singleinstance import *
 from .translateutil import *
