@@ -252,7 +252,12 @@ db.close()
 
 ### ☤ Notification Utilities
 
-#### Sending Notifications
+`wtfutil.notifyutil` 提供了统一的多渠道通知能力，你可以：
+
+- **通过 `util.send` 一次性广播到所有已配置渠道**
+- **按需直接调用具体渠道函数（如 Feishu、ShowDoc、自定义 Webhook 等）**
+
+#### 1. Quick start with `util.send`
 
 ```python
 from wtfutil import util
@@ -261,7 +266,102 @@ from wtfutil import util
 util.send('Alert', 'Something happened!')
 ```
 
-Supported channels include Bark, DingTalk, FeiShu, Telegram, SMTP, and more. Configuration is flexible via `wtfconfig.ini` or environment variables.
+`util.send(title, content)` 会根据当前已配置的渠道（Bark、钉钉、飞书、Telegram、SMTP、ShowDoc、自定义 Webhook 等）并发推送，同一条消息自动发送到多个端。
+
+#### 2. Using `notifyutil` directly
+
+如果你只想推送到某一类通道（例如只发飞书或 ShowDoc），可以直接使用 `notifyutil`：
+
+```python
+from wtfutil import notifyutil
+
+try:
+    # 纯文本飞书消息
+    notifyutil.feishu_text(f"启动 GalaxyFrpc 失败: {e}")
+
+    # 标题 + 内容，内部会调用 feishu_text
+    error_msg = "GalaxyFrpc 启动异常，请检查配置或网络状态"
+    notifyutil.feishu_bot("告警", error_msg)
+except ValueError as ex:
+    # 当 FEISHU_KEY 未配置等情况会抛出 ValueError
+    print(f"Feishu push error: {ex}")
+```
+
+发送到 ShowDoc 推送服务：
+
+```python
+from wtfutil import notifyutil
+
+notifyutil.showdoc(
+    "定时任务执行结果",
+    "每日数据同步已完成，共处理 123 条记录。"
+)
+```
+
+使用自定义 Webhook（企业自建告警平台、流水线回调等）：
+
+```python
+from wtfutil import notifyutil
+
+title = "自定义告警"
+content = "磁盘使用率超过 90%，请及时处理。"
+
+notifyutil.custom_notify(title, content)
+```
+
+更多可用函数（部分示例）：
+
+- `notifyutil.bark(title, content)`
+- `notifyutil.dingding_bot(title, content)`
+- `notifyutil.telegram_bot(title, content)`
+- `notifyutil.smtp(title, content)`          # 通过邮件发送
+- `notifyutil.pushme(title, content)`
+- `notifyutil.notifyx(title, content)`
+
+完整列表可参考 `wtfutil/notifyutil.py` 中的 `__all__` 定义。
+
+#### 3. Notification channels and required keys
+
+每个通知渠道都对应一组配置键（可在 `wtfconfig.ini` 的 `[notify]` 段中设置，也可通过环境变量设置同名键）：
+
+- **Console**
+  - `CONSOLE`：是否在控制台打印内容（如 `true`/`false`）
+
+- **Bark**
+  - `BARK_PUSH`：设备码或完整 URL（如 `https://api.day.app/xxxx/`）
+  - 可选：`BARK_GROUP`、`BARK_SOUND`、`BARK_ICON`、`BARK_LEVEL`、`BARK_URL`
+
+- **DingTalk (钉钉机器人)**
+  - `DD_BOT_TOKEN`：机器人 access token
+  - `DD_BOT_SECRET`：机器人签名密钥
+
+- **Feishu (飞书机器人)**
+  - `FEISHU_KEY`：群机器人 Webhook key（必填）
+  - `FEISHU_SECRET`：签名校验密钥（可选）
+
+- **Telegram**
+  - `TG_BOT_TOKEN`：Bot token
+  - `TG_USER_ID`：接收者用户 ID
+  - 可选：`TG_API_HOST`、`TG_PROXY_HOST`、`TG_PROXY_PORT`、`TG_PROXY_AUTH`
+
+- **Email (SMTP)**
+  - `SMTP_SERVER`：SMTP 服务器地址（如 `smtp.exmail.qq.com:465`）
+  - `SMTP_SSL`：是否使用 SSL（`true`/`false`）
+  - `SMTP_EMAIL`：发件/收件邮箱（通常同一个）
+  - `SMTP_PASSWORD`：密码或授权码
+  - `SMTP_NAME`：显示名称
+
+- **ShowDoc**
+  - `SHOWDOC_KEY`：来自 ShowDoc 推送页面的 key（详见 `https://push.showdoc.com.cn/#/push`）
+
+- **Custom Webhook**
+  - `WEBHOOK_URL`：请求地址，可以包含 `$title` / `$content` 占位符
+  - `WEBHOOK_METHOD`：HTTP 方法（如 `POST`）
+  - `WEBHOOK_CONTENT_TYPE`：`application/json` 或 `application/x-www-form-urlencoded` 等
+  - `WEBHOOK_HEADERS`：以多行 `Key: Value` 字符串表示的请求头
+  - `WEBHOOK_BODY`：请求体模板，支持 `$title` / `$content` 占位符
+
+更多可选渠道（PushDeer、PushPlus、企业微信、NotifyX、PipeHub、Aiops 等）对应的 key 命名与 `notifyutil.push_config` 中的字段保持一致，具体可直接查阅 `wtfutil/notifyutil.py`。
 
 ### ☤ Translation Utilities
 
@@ -392,32 +492,97 @@ This keeps your code light and clear. Alternatively, import `util` for everythin
 
 ## ☤ Configuration
 
-For notification services, configure settings in `wtfconfig.ini` or via environment variables. Example `wtfconfig.ini`:
+For notification services, you can configure settings in `wtfconfig.ini` or via environment variables. Environment variables **always override** values in `wtfconfig.ini`.
 
 ### Using wtfconfig.ini
 
-Place this file in your working directory:
+Place this file in your working directory (or `resource/wtfconfig.ini`, or `~/wtfconfig.ini`, all resolved via `util.get_resource`):
 
 ```ini
 [notify]
-BARK_PUSH=https://api.day.app/your_key
-TG_BOT_TOKEN=your_token
-TG_USER_ID=your_id
+
+; ====== 通用选项 ======
+; 是否在消息末尾追加“一言”句子
+HITOKOTO = false
+
+; 是否同时在控制台打印推送内容
+CONSOLE = true
+
+; ====== Bark 推送 ======
+; 完整 URL 或仅设备码均可
+; 示例：BARK_PUSH = https://api.day.app/DxHcxxxxxRxxxxxxcm/
+; 示例：BARK_PUSH = DxHcxxxxxRxxxxxxcm
+BARK_PUSH =
+BARK_GROUP =
+BARK_SOUND =
+BARK_ICON =
+BARK_LEVEL =
+BARK_URL =
+
+; ====== Telegram 机器人 ======
+TG_BOT_TOKEN =
+TG_USER_ID   =
+TG_API_HOST  =
+TG_PROXY_HOST =
+TG_PROXY_PORT =
+TG_PROXY_AUTH =
+
+; ====== Feishu / 飞书机器人 ======
+; 对应开放平台自建群机器人的 hook key
+FEISHU_KEY    =
+; （可选）启用签名校验时的 secret
+FEISHU_SECRET =
+
+; ====== DingTalk / 钉钉机器人 ======
+DD_BOT_TOKEN  =
+DD_BOT_SECRET =
+
+; ====== SMTP 邮件 ======
+; SMTP_SERVER 形如：smtp.exmail.qq.com:465
+SMTP_SERVER   =
+SMTP_SSL      = false
+SMTP_EMAIL    =
+SMTP_PASSWORD =
+SMTP_NAME     =
+
+; ====== ShowDoc 推送 ======
+; 对应 ShowDoc 的 push key：https://push.showdoc.com.cn/#/push
+SHOWDOC_KEY   =
+
+; ====== 自定义 Webhook ======
+; WEBHOOK_URL / WEBHOOK_BODY 中可使用变量 $title 和 $content
+WEBHOOK_URL          =
+WEBHOOK_METHOD       = POST
+WEBHOOK_CONTENT_TYPE = application/json
+WEBHOOK_HEADERS      =
+WEBHOOK_BODY         =
 ```
 
 ### Using Environment Variables
 
-Set variables in your shell:
+Set variables in your shell (example for Linux/macOS):
 
 ```bash
 export BARK_PUSH=https://api.day.app/your_bark_key
 export TG_BOT_TOKEN=your_telegram_bot_token
 export TG_USER_ID=your_telegram_user_id
+export FEISHU_KEY=your_feishu_bot_key
+export SHOWDOC_KEY=your_showdoc_push_key
+```
+
+On Windows PowerShell:
+
+```powershell
+$env:BARK_PUSH = "https://api.day.app/your_bark_key"
+$env:TG_BOT_TOKEN = "your_telegram_bot_token"
+$env:TG_USER_ID = "your_telegram_user_id"
+$env:FEISHU_KEY = "your_feishu_bot_key"
+$env:SHOWDOC_KEY = "your_showdoc_push_key"
 ```
 
 ### Priority
 
--   Environment variables take precedence over wtfconfig.ini.
+-   **Environment variables take precedence** over `wtfconfig.ini`.
 -   If neither is provided, notifications may fail unless defaults are set.
 
 ## ☤ Contributing
