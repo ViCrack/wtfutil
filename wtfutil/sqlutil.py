@@ -23,12 +23,12 @@ logger.addHandler(handler)
 
 
 class ScriptRunner:
-    def __init__(self, connection, delimiter=";", autocommit=True):
+    def __init__(self, connection: Any, delimiter: str = ";", autocommit: bool = True) -> None:
         self.connection = connection
         self.delimiter = delimiter
         self.autocommit = autocommit
 
-    def run_script(self, sql):
+    def run_script(self, sql: str) -> None:
         try:
             script = ""
             for line in sql.splitlines():
@@ -89,22 +89,22 @@ class Dict(dict):
 
     """
 
-    def __init__(self, names=(), values=(), **kw):
+    def __init__(self, names: tuple[str, ...] = (), values: tuple[Any, ...] = (), **kw: Any) -> None:
         super(Dict, self).__init__(**kw)
         for k, v in zip(names, values):
             self[k] = v
 
-    def __getattr__(self, key):
+    def __getattr__(self, key: str) -> Any:
         try:
             return self[key]
         except KeyError:
             raise AttributeError(r"'Dict' object has no attribute '%s'" % key)
 
-    def __setattr__(self, key, value):
+    def __setattr__(self, key: str, value: Any) -> None:
         self[key] = value
 
 
-def next_id(t=None):
+def next_id(t: float | None = None) -> str:
     """
     Return next id as 50-char string.
     Args:
@@ -115,7 +115,7 @@ def next_id(t=None):
     return '%015d%s000' % (int(t * 1000), uuid.uuid4().hex)
 
 
-def join_field_value(data, glue=', '):
+def join_field_value(data: Dict[str, Any], glue: str = ', ') -> str:
     sql = comma = ''
     for key in data.keys():
         sql += "{}`{}` = ?".format(comma, key)
@@ -123,7 +123,7 @@ def join_field_value(data, glue=', '):
     return sql
 
 
-def join_field(data, glue=', '):
+def join_field(data: Dict[str, Any], glue: str = ', ') -> str:
     sql = comma = ''
     for key in data.keys():
         sql += "{}`{}`".format(comma, key)
@@ -131,7 +131,7 @@ def join_field(data, glue=', '):
     return sql
 
 
-def join_value(data, glue=', '):
+def join_value(data: Dict[str, Any], glue: str = ', ') -> str:
     sql = comma = ''
     for key in data.values():
         sql += "{}?".format(comma, key)

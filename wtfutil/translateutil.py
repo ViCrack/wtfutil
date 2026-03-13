@@ -11,7 +11,7 @@ from . import util
 
 class BaiduTranslateApi:
 
-    def __init__(self, appid, appkey, from_lang='zh', to_lang='en'):
+    def __init__(self, appid: str, appkey: str, from_lang: str = 'zh', to_lang: str = 'en') -> None:
         self.appid = appid
         self.appkey = appkey
         self.from_lang = from_lang
@@ -20,7 +20,12 @@ class BaiduTranslateApi:
 
     @limits(calls=1, period=1)  # 每秒钟最多只能调用 1 次
     @sleep_and_retry  # 如果超过调用限制，则等待剩余时间后重试
-    def translate(self, query, from_lang=None, to_lang=None, ):
+    def translate(
+        self,
+        query: str,
+        from_lang: str | None = None,
+        to_lang: str | None = None,
+    ) -> str:
         from_lang = from_lang or self.from_lang
         to_lang = to_lang or self.to_lang
 

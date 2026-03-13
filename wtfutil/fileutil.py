@@ -10,39 +10,49 @@ from typing import Optional
 from typing import Union
 
 
-def file_md5(file_path) -> str:
+def file_md5(file_path: str | Path) -> str:
     md5lib = hashlib.md5()
-    with open(file_path, 'rb') as f:
+    with open(str(file_path), 'rb') as f:
         md5lib.update(f.read())
     return md5lib.hexdigest()
 
 
-def file_sha1(file_path):
+def file_sha1(file_path: str | Path) -> str:
     sha1 = hashlib.sha1()
-    with open(file_path, 'rb') as f:
+    with open(str(file_path), 'rb') as f:
         sha1.update(f.read())
     return sha1.hexdigest()
 
 
-def file_sha256(file_path):
+def file_sha256(file_path: str | Path) -> str:
     sha1 = hashlib.sha256()
-    with open(file_path, 'rb') as f:
+    with open(str(file_path), 'rb') as f:
         sha1.update(f.read())
     return sha1.hexdigest()
 
 
-def list_files(directory):
+def list_files(directory: str | Path) -> list[str]:
     """List all files in a directory."""
-    return [os.path.join(directory, f) for f in os.listdir(directory) if os.path.isfile(os.path.join(directory, f))]
+    directory_str = str(directory)
+    return [
+        os.path.join(directory_str, f)
+        for f in os.listdir(directory_str)
+        if os.path.isfile(os.path.join(directory_str, f))
+    ]
 
 
-def list_directories(directory):
+def list_directories(directory: str | Path) -> list[str]:
     """List all directories in a directory."""
-    return [os.path.join(directory, d) for d in os.listdir(directory) if os.path.isdir(os.path.join(directory, d))]
+    directory_str = str(directory)
+    return [
+        os.path.join(directory_str, d)
+        for d in os.listdir(directory_str)
+        if os.path.isdir(os.path.join(directory_str, d))
+    ]
 
 
-def touch(filepath, mode=0o666, exist_ok=True):
-    return Path(filepath, mode=mode, exist_ok=exist_ok).touch()
+def touch(filepath: str | Path, mode: int = 0o666, exist_ok: bool = True) -> None:
+    Path(filepath).touch(mode=mode, exist_ok=exist_ok)
 
 
 def read_text(filepath: Union[Path, str], mode='r', encoding='utf-8', not_exists_ok: bool = False, errors=None) -> str:

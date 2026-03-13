@@ -13,7 +13,7 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from io import BytesIO
 from socket import gethostbyname
-from typing import Callable, List, Generator, Tuple, Optional, Union, Dict, Any
+from typing import Callable, List, Generator, Tuple, Optional, Union, Dict, Any, Iterable
 from urllib.parse import urljoin
 from urllib.parse import urlparse
 
@@ -36,7 +36,7 @@ from .strutil import *
 _http_context = threading.local()
 
 
-def get_redirect_target(self, resp):
+def get_redirect_target(self, resp: Response) -> str | None:
     """hook requests.Session.get_redirect_target method"""
     if resp.is_redirect:
         location = resp.headers['location']
@@ -46,15 +46,15 @@ def get_redirect_target(self, resp):
     return None
 
 
-def patch_redirect():
+def patch_redirect() -> None:
     requests.Session.get_redirect_target = get_redirect_target
 
 
-def remove_ssl_verify():
+def remove_ssl_verify() -> None:
     ssl._create_default_https_context = ssl._create_unverified_context
 
 
-def patch_getproxies():
+def patch_getproxies() -> None:
     # 高版本python已经修复了这个问题
     # https://bugs.python.org/issue42627
     # https://www.cnblogs.com/davyyy/p/14388623.html
@@ -684,7 +684,7 @@ class DESAdapter(HTTPAdapter):
         kwargs["ssl_context"] = context
 
 
-def httpraw(raw: str, ssl: bool = False, **kwargs) -> requests.Response:
+def httpraw(raw: str, ssl: bool = False, **kwargs: Any) -> requests.Response:
     """
     代码来源Pocsuite, 修复postData只发送一行的bug
     发送原始HTTP封包请求,如果你在参数中设置了例如headers参数，将会发送你设置的参数
@@ -743,18 +743,27 @@ def httpraw(raw: str, ssl: bool = False, **kwargs) -> requests.Response:
 requests.httpraw = httpraw
 
 
-def is_private_ip(ip):
+def is_private_ip(ip_str: str) -> bool:
     """
-    判断IP地址是否是内网IP，如果传入的不是有效IP则也会返回False
+    检测 IP 是否为私有内网 IP
+    私有 IP 范围：
+    - 10.0.0.0/8 (10.0.0.0 to 10.255.255.255)
+    - 172.16.0.0/12 (172.16.0.0 to 172.31.255.255)
+    - 192.168.0.0/16 (192.168.0.0 to 192.168.255.255)
+    - 127.0.0.0/8 (本地回环)
+
+    注意：排除 Clash fake-ip 网段 198.18.0.0/16
     """
     try:
-        ip_obj = ipaddress.ip_address(ip)
-        return ip_obj.is_private
+        ip = ipaddress.ip_address(ip_str)
+        if ip in ipaddress.ip_network("198.18.0.0/16", strict=False):
+            return False
+        return ip.is_private or ip.is_loopback
     except ValueError:
         return False
 
 
-def is_internal_url(url):
+def is_internal_url(url: str) -> bool:
     """
     判断URL是否是内网IP对应的URL
     """
@@ -766,7 +775,7 @@ def is_internal_url(url):
     return is_private_ip(ip)
 
 
-def is_wildcard_dns(domain):
+def is_wildcard_dns(domain: str) -> bool:
     """
     传入主域名
     判断域名是否有泛解析
@@ -792,7 +801,11 @@ def is_valid_ip(ip: str) -> bool:
         return False
 
 
-def is_wildcard_dns_batch(domain_list: iter, thread_num: int = 10, show_progress: bool = True) -> dict:
+def is_wildcard_dns_batch(
+    domain_list: Iterable[str],
+    thread_num: int = 10,
+    show_progress: bool = True,
+) -> dict[str, bool]:
     """
     多线程批量判断域名是否泛解析
     传入域名或者URL列表、，支持解析成主域名
@@ -825,7 +838,7 @@ def is_wildcard_dns_batch(domain_list: iter, thread_num: int = 10, show_progress
     return result
 
 
-def get_maindomain(subdomain):
+def get_maindomain(subdomain: str) -> str:
     # get the main domain from subdomain
     tld = tldextract.extract(subdomain)
     if tld.suffix != '':
@@ -835,7 +848,7 @@ def get_maindomain(subdomain):
     return domain
 
 
-def url2ip(url, with_port=False):
+def url2ip(url: str, with_port: bool = False) -> str | Tuple[str, int]:
     """
     works like turning 'http://baidu.com' => '180.149.132.47'
     """

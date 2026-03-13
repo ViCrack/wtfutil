@@ -11,6 +11,7 @@ import random
 import re
 import string
 import sys
+from typing import Any
 from io import BytesIO
 from urllib.parse import unquote, quote
 
@@ -21,7 +22,7 @@ from Crypto.Util.Padding import pad, unpad
 from requests.structures import CaseInsensitiveDict
 
 
-def tobytes(s, encoding="UTF-8") -> bytes:
+def tobytes(s: Any, encoding: str = "UTF-8") -> bytes:
     """
     convert to bytes
     """
@@ -37,7 +38,7 @@ def tobytes(s, encoding="UTF-8") -> bytes:
         return bytes([s])
 
 
-def tostr(value, encoding='UTF-8') -> str:
+def tostr(value: Any, encoding: str = 'UTF-8') -> str:
     if value is None:
         return value
     if isinstance(value, str):
@@ -47,7 +48,7 @@ def tostr(value, encoding='UTF-8') -> str:
     return str(value)
 
 
-def tobool(value) -> bool:
+def tobool(value: Any) -> bool:
     """Return whether the provided string (or any value really) represents true. Otherwise false.
     Just like plugin server stringToBoolean.
     Replace distutils.strtobool
@@ -66,11 +67,11 @@ def tobool(value) -> bool:
 
 if sys.version_info >= (3, 9):
     # If Python version is 3.9 or newer, use the built-in removesuffix method
-    def removesuffix(s, suffix):
+    def removesuffix(s: str, suffix: str) -> str:
         return s.removesuffix(suffix)
 
 
-    def removeprefix(s, prefix):
+    def removeprefix(s: str, prefix: str) -> str:
         return s.removeprefix(prefix)
 else:
     def removesuffix(self: str, suffix: str) -> str:
@@ -150,7 +151,7 @@ def qp_encode_all(text_input: bytes | str,
     return f"=?{display_charset}?Q?{qp_text}?="
 
 
-def uuencode(binary_data):
+def uuencode(binary_data: bytes | str) -> str:
     """
     类似java中的UUEncoder实现
     """
@@ -185,7 +186,7 @@ def base64decode(value: str, encoding='utf-8', errors='strict') -> str:
     return str(base64.b64decode(value), encoding=encoding, errors=errors)
 
 
-def base64encode(value) -> str:
+def base64encode(value: bytes | str) -> str:
     """
     python3 返回的是bytes
     Encodes string value from plain to Base64 format
@@ -198,7 +199,7 @@ def base64encode(value) -> str:
     return str(base64.b64encode(value), encoding='utf-8')
 
 
-def base64_urlencode(value) -> str:
+def base64_urlencode(value: bytes | str) -> str:
     """
     base64encode + urlencode
     """
@@ -230,7 +231,7 @@ def urlsafe_base64decode(value: str, encoding='utf-8', errors='strict') -> str:
     return str(base64.urlsafe_b64decode(value), encoding=encoding, errors=errors)
 
 
-def base64pickle(value):
+def base64pickle(value: Any) -> str:
     """
     Serializes (with pickle) and encodes to Base64 format supplied (binary) value
     >>> base64pickle('foobar')
@@ -254,7 +255,7 @@ def base64pickle(value):
     return retVal
 
 
-def base64unpickle(value):
+def base64unpickle(value: str | bytes) -> Any:
     """
     Decodes value from Base64 to plain format and deserializes (with pickle) its content
     >>> base64unpickle('gAJVBmZvb2JhcnEALg==')
@@ -288,7 +289,7 @@ def base64unpickle(value):
     return retVal
 
 
-def rsa_encrypt(data, public_key, block_size=None):
+def rsa_encrypt(data: str | bytes, public_key: str, block_size: int | None = None) -> str:
     """rsa encrypt
     需要考虑分段使用公钥加密
     单次加密串的长度最大为(key_size / 8 - 11)
@@ -316,7 +317,7 @@ def rsa_encrypt(data, public_key, block_size=None):
     return base64.b64encode(b''.join(encrypted_chunks)).decode('utf-8')
 
 
-def rsa_decrypt(data, private_key, block_size=None):
+def rsa_decrypt(data: str | bytes, private_key: str, block_size: int | None = None) -> str:
     """rsa decrypt"""
     if isinstance(data, str):
         data = data.encode('utf-8')
@@ -336,7 +337,12 @@ def rsa_decrypt(data, private_key, block_size=None):
     return b''.join(decrypted_chunks).decode('utf-8')
 
 
-def des_encrypt(plaintext: str, key: str, mode=DES.MODE_ECB, padding='pkcs7'):
+def des_encrypt(
+    plaintext: str,
+    key: str,
+    mode: int = DES.MODE_ECB,
+    padding: str = 'pkcs7',
+) -> str:
     """des encrypt
     默认使用ECB模式，padding默认使用pkcs7
     密钥长度不要超过8位，超过8位会报错
@@ -349,7 +355,12 @@ def des_encrypt(plaintext: str, key: str, mode=DES.MODE_ECB, padding='pkcs7'):
     return ciphertext
 
 
-def des_decrypt(ciphertext, key: str, mode=DES.MODE_ECB, padding='pkcs7'):
+def des_decrypt(
+    ciphertext: str | bytes,
+    key: str,
+    mode: int = DES.MODE_ECB,
+    padding: str = 'pkcs7',
+) -> str:
     """des decrypt
     输入的ciphertext是base64编码
     默认使用ECB模式，padding默认使用pkcs7
@@ -363,13 +374,13 @@ def des_decrypt(ciphertext, key: str, mode=DES.MODE_ECB, padding='pkcs7'):
     return plaintext.decode('utf-8')
 
 
-def str_md5(data) -> str:
+def str_md5(data: str | bytes) -> str:
     if isinstance(data, str):
         data = data.encode('utf-8')
     return hashlib.md5(data).hexdigest()
 
 
-def str_sha1(data) -> str:
+def str_sha1(data: str | bytes) -> str:
     if isinstance(data, str):
         data = data.encode('utf-8')
     return hashlib.sha1(data).hexdigest()
@@ -380,7 +391,7 @@ def str_sha256(data) -> str:
     return hashlib.sha256(data).hexdigest()
 
 
-def get_middle_text(text, start_delim, end_delim, position=0):
+def get_middle_text(text: str, start_delim: str, end_delim: str, position: int = 0) -> str:
     """
     提取文本中两个分隔符之间的内容
     
@@ -411,7 +422,7 @@ def get_middle_text(text, start_delim, end_delim, position=0):
     return ""
 
 
-def splitlines(string: str) -> list:
+def splitlines(string: str) -> list[str]:
     """
     提供多行字符串，用换行分隔成list，trim并且去重，不包括空行
     """
@@ -427,7 +438,7 @@ def splitlines(string: str) -> list:
     return result
 
 
-def rand_base(length, letters=string.ascii_lowercase + string.digits):
+def rand_base(length: int, letters: str = string.ascii_lowercase + string.digits) -> str:
     """从可选字符集生成给定长度字符串的随机序列(默认为字母和数字)
     """
     return ''.join(random.choice(letters) for i in range(length))
@@ -466,7 +477,7 @@ def rand_case(s: str) -> str:
     return ''.join(result)
 
 
-def match1(text, *patterns):
+def match1(text: str, *patterns: str) -> str | list[str] | None:
     """Scans through a string for substrings matched some patterns (first-subgroups only).
 
     Args:
@@ -494,7 +505,7 @@ def match1(text, *patterns):
         return ret
 
 
-def string_to_bash_variable(string):
+def string_to_bash_variable(string: str) -> str:
     # 定义不允许出现在bash变量名中的字符
     invalid_chars = ['.', '/', '-', '=', '`', "'", '"']
     # 将字符串中的非法字符替换成下划线
@@ -508,7 +519,7 @@ def string_to_bash_variable(string):
     return bash_var
 
 
-def normalize_spaces(s):
+def normalize_spaces(s: str) -> str:
     """Normalize multiple spaces into a single space.
     删除多余空格并合并为单个空格"""
     return ' '.join(s.split())

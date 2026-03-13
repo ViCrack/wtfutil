@@ -19,11 +19,11 @@ from .translateutil import *
 
 
 class UniqueQueue(queue.Queue):
-    def __init__(self, maxsize=0):
+    def __init__(self, maxsize: int = 0) -> None:
         super().__init__(maxsize)
         self.queue_set = set()
 
-    def put(self, item, block=True, timeout=None):
+    def put(self, item: Any, block: bool = True, timeout: float | None = None) -> None:
         """
         一个对象重复put将会忽略
         """
@@ -40,7 +40,7 @@ def measure_time(func):
     记录函数执行时间"""
 
     @wraps(func)
-    def wrapper(*args, **kwargs):
+    def wrapper(*args: Any, **kwargs: Any) -> Any:
         start_time = time.time()
         result = func(*args, **kwargs)
         end_time = time.time()
@@ -51,7 +51,7 @@ def measure_time(func):
     return wrapper
 
 
-def unique_items(iterable: Iterable) -> list:
+def unique_items(iterable: Iterable[Any]) -> list[Any]:
     """Return unique items from an iterable while preserving order.
     列表去重"""
     seen = set()
@@ -63,17 +63,17 @@ def current_datetime():
     return datetime.datetime.now()
 
 
-def format_datetime(dt: datetime, format: str = '%Y-%m-%d %H:%M:%S') -> str:
+def format_datetime(dt: datetime.datetime, format: str = '%Y-%m-%d %H:%M:%S') -> str:
     """Format a datetime object as a string."""
     return dt.strftime(format)
 
 
-def parse_datetime(date_string: str, format: str = '%Y-%m-%d %H:%M:%S') -> datetime:
+def parse_datetime(date_string: str, format: str = '%Y-%m-%d %H:%M:%S') -> datetime.datetime:
     """Parse a datetime string into a datetime object."""
     return datetime.datetime.strptime(date_string, format)
 
 
-def cut_list(obj, size):
+def cut_list(obj: list[Any], size: int) -> list[list[Any]]:
     return [obj[i:i + size] for i in range(0, len(obj), size)]
 
 
@@ -156,7 +156,7 @@ def group_data(
     return dict(grouped)  # 返回标准的字典而不是 defaultdict
 
 
-def get_resource_dir(basedir=None):
+def get_resource_dir(basedir: str | None = None) -> str:
     if not basedir:
         basedir = sys._getframe(1).f_code.co_filename
     current_dir = getattr(sys, '_MEIPASS', os.path.dirname(basedir))
@@ -176,7 +176,7 @@ def get_resource_dir(basedir=None):
     return resource_folder
 
 
-def get_resource(filename):
+def get_resource(filename: str) -> str | None:
     if Path(filename).exists():
         return filename
     resource_path = get_resource_dir(sys._getframe(1).f_code.co_filename) + "/" + filename
