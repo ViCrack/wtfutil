@@ -9,7 +9,7 @@ import sys
 from shutil import rmtree
 
 __author__ = "vicrack"
-__version__ = "1.2.9"
+__version__ = "1.2.10"
 __contact__ = "18179821+ViCrack@users.noreply.github.com"
 __url__ = "https://github.com/vicrack"
 __license__ = "GPL-3.0-or-later"
@@ -17,7 +17,9 @@ requires = [
     "pymysql",
     "faker",
     "fake_useragent",
+    "configobj",
     "requests",
+    "urllib3",
     "requests_cache",
     "requests-toolbelt",
     "tldextract",
@@ -27,6 +29,7 @@ requires = [
     "pycryptodome",
     "portalocker",
     "psutil",
+    "pywin32; platform_system == 'Windows'",
 ]
 
 here = os.path.abspath(os.path.dirname(__file__))
