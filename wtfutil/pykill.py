@@ -7,28 +7,65 @@ pykill - 根据脚本名或命令行模式终止 Python 进程的命令行工具
     pykill myscript.py                    # 按脚本路径终止（支持相对/绝对路径）
     pykill C:\\path\\to\\myscript.py       # 绝对路径精确匹配
     pykill -c "worker --queue"            # 模糊匹配命令行子串
-    pykill -f myscript.py                 # 仅查找 PID，不终止
+    pykill -f myscript.py                 # 仅查找进程，不终止
     pykill -n myscript.py                 # 模拟运行，显示将要终止的进程
 """
 
 import argparse
 import sys
 
+import psutil
+from rich.console import Console
+from rich.table import Table
+from rich import box
+
 from .procutil import (
-    find_python_processes_by_script,
-    find_python_processes_by_cmdline,
-    kill_python_processes_by_script,
-    kill_python_processes_by_cmdline,
+    find_python_process_details_by_script,
+    find_python_process_details_by_cmdline,
 )
 
+console = Console()
 
-def _print_processes(pids: list, target: str, mode: str) -> None:
-    if not pids:
-        print(f"[pykill] 未找到匹配的 Python 进程: {target!r} (模式={mode})")
-    else:
-        print(f"[pykill] 找到 {len(pids)} 个匹配进程 (模式={mode}):")
-        for pid in pids:
-            print(f"  PID {pid}")
+
+def _build_table(details: list, title: str) -> Table:
+    table = Table(
+        title=title,
+        box=box.ROUNDED,
+        show_lines=True,
+        highlight=True,
+        title_style="bold cyan",
+    )
+    table.add_column("PID", style="bold yellow", justify="right", no_wrap=True)
+    table.add_column("进程名", style="green", no_wrap=True)
+    table.add_column("脚本", style="cyan")
+    table.add_column("绝对路径", style="blue")
+    table.add_column("工作目录 (cwd)", style="magenta")
+    table.add_column("完整命令行", style="white", overflow="fold")
+
+    for d in details:
+        table.add_row(
+            str(d.get("pid", "")),
+            d.get("name", ""),
+            d.get("script", ""),
+            d.get("script_abs", ""),
+            d.get("cwd", ""),
+            d.get("cmdline", ""),
+        )
+    return table
+
+
+def _kill_pids(pids: list) -> bool:
+    success = False
+    for pid in pids:
+        try:
+            psutil.Process(pid).kill()
+            console.print(f"  [green]✓[/green] PID {pid} 已终止")
+            success = True
+        except psutil.NoSuchProcess:
+            console.print(f"  [yellow]⚠[/yellow] PID {pid} 进程不存在（已退出）")
+        except psutil.AccessDenied:
+            console.print(f"  [red]✗[/red] PID {pid} 权限不足，无法终止")
+    return success
 
 
 def main() -> int:
@@ -44,13 +81,13 @@ def main() -> int:
         "-c", "--cmdline",
         action="store_true",
         default=False,
-        help="使用命令行子串模糊匹配模式，而非脚本路径匹配",
+        help="使用命令行子串模糊匹配，而非脚本路径匹配",
     )
     parser.add_argument(
         "-f", "--find",
         action="store_true",
         default=False,
-        help="仅查找并显示匹配的进程 PID，不执行终止操作",
+        help="仅查找并显示匹配进程，不执行终止",
     )
     parser.add_argument(
         "-n", "--dry-run",
@@ -61,38 +98,42 @@ def main() -> int:
     )
 
     args = parser.parse_args()
-
-    mode = "cmdline" if args.cmdline else "script"
+    mode = "cmdline 模糊匹配" if args.cmdline else "脚本路径匹配"
 
     if args.cmdline:
-        pids = find_python_processes_by_cmdline(args.target)
+        details = find_python_process_details_by_cmdline(args.target)
     else:
-        pids = find_python_processes_by_script(args.target)
+        details = find_python_process_details_by_script(args.target)
 
-    if args.find or args.dry_run:
-        _print_processes(pids, args.target, mode)
-        if args.dry_run and pids:
-            print("[pykill] 模拟运行，未实际终止任何进程。")
-        return 0 if pids else 1
-
-    if not pids:
-        print(f"[pykill] 未找到匹配的 Python 进程: {args.target!r} (模式={mode})")
+    if not details:
+        console.print(
+            f"[bold red]未找到匹配的 Python 进程[/bold red]  "
+            f"目标: [yellow]{args.target!r}[/yellow]  模式: {mode}"
+        )
         return 1
 
-    print(f"[pykill] 正在终止 {len(pids)} 个进程 (模式={mode}):")
-    for pid in pids:
-        print(f"  PID {pid}")
+    table = _build_table(
+        details,
+        title=f"匹配到 {len(details)} 个进程  [{mode}]  目标: {args.target!r}",
+    )
+    console.print(table)
 
-    if args.cmdline:
-        success = kill_python_processes_by_cmdline(args.target)
-    else:
-        success = kill_python_processes_by_script(args.target)
+    if args.find:
+        return 0
+
+    if args.dry_run:
+        console.print("[bold yellow]模拟运行，未实际终止任何进程。[/bold yellow]")
+        return 0
+
+    console.print(f"\n[bold]正在终止 {len(details)} 个进程...[/bold]")
+    pids = [d["pid"] for d in details]
+    success = _kill_pids(pids)
 
     if success:
-        print("[pykill] 完成。")
+        console.print("[bold green]完成。[/bold green]")
         return 0
     else:
-        print("[pykill] 终止失败（进程可能已退出或权限不足）。")
+        console.print("[bold red]所有进程终止失败（权限不足或已退出）。[/bold red]")
         return 1
 
 

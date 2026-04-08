@@ -314,6 +314,97 @@ def find_python_processes_by_cmdline(pattern: str) -> List[int]:
     return results
 
 
+def _build_proc_detail(info: dict) -> dict:
+    """从 psutil 进程信息构建展示用的详情字典"""
+    cmdline = info.get('cmdline') or []
+    script_arg = _get_script_from_cmdline(cmdline)
+    proc_cwd = info.get('cwd') or ''
+    script_abs = _resolve_script_abs(script_arg, proc_cwd) if script_arg else ''
+    return {
+        'pid': info.get('pid'),
+        'name': info.get('name') or '',
+        'script': script_arg or '',
+        'script_abs': script_abs,
+        'cwd': proc_cwd,
+        'cmdline': ' '.join(cmdline),
+    }
+
+
+def find_python_process_details_by_script(script_name: str) -> List[dict]:
+    """
+    根据 Python 脚本名查找所有匹配进程，返回详情字典列表。
+
+    每个字典包含：pid, name, script, script_abs, cwd, cmdline
+
+    Args:
+        script_name: 脚本路径，可以是相对路径或绝对路径
+
+    Returns:
+        匹配的进程详情列表
+    """
+    target_abs = os.path.normcase(os.path.abspath(script_name))
+    target_basename = os.path.normcase(os.path.basename(script_name))
+
+    exact_matches: List[dict] = []
+    basename_matches: List[dict] = []
+
+    for proc in psutil.process_iter(['pid', 'name', 'cmdline', 'cwd']):
+        try:
+            info = proc.info
+            if not _is_python_process(info.get('name') or ''):
+                continue
+
+            cmdline = info.get('cmdline') or []
+            script_arg = _get_script_from_cmdline(cmdline)
+            if not script_arg:
+                continue
+
+            proc_cwd = info.get('cwd') or ''
+            script_abs = _resolve_script_abs(script_arg, proc_cwd)
+
+            if script_abs == target_abs:
+                exact_matches.append(_build_proc_detail(info))
+            elif os.path.normcase(os.path.basename(script_arg)) == target_basename:
+                basename_matches.append(_build_proc_detail(info))
+
+        except (psutil.NoSuchProcess, psutil.AccessDenied):
+            continue
+
+    return exact_matches if exact_matches else basename_matches
+
+
+def find_python_process_details_by_cmdline(pattern: str) -> List[dict]:
+    """
+    对 Python 进程命令行进行模糊匹配，返回详情字典列表。
+
+    每个字典包含：pid, name, script, script_abs, cwd, cmdline
+
+    Args:
+        pattern: 要匹配的命令行子串
+
+    Returns:
+        匹配的进程详情列表
+    """
+    pattern_lower = pattern.lower()
+    results: List[dict] = []
+
+    for proc in psutil.process_iter(['pid', 'name', 'cmdline', 'cwd']):
+        try:
+            info = proc.info
+            if not _is_python_process(info.get('name') or ''):
+                continue
+
+            cmdline = info.get('cmdline') or []
+            cmdline_str = ' '.join(cmdline).lower()
+            if pattern_lower in cmdline_str:
+                results.append(_build_proc_detail(info))
+
+        except (psutil.NoSuchProcess, psutil.AccessDenied):
+            continue
+
+    return results
+
+
 def kill_python_processes_by_cmdline(pattern: str) -> bool:
     """
     对 Python 进程命令行进行模糊匹配，终止所有匹配的进程。
@@ -347,7 +438,9 @@ __all__ = [
     'resume_process_by_pid',
     'find_python_process_by_script',
     'find_python_processes_by_script',
+    'find_python_process_details_by_script',
     'kill_python_processes_by_script',
     'find_python_processes_by_cmdline',
+    'find_python_process_details_by_cmdline',
     'kill_python_processes_by_cmdline',
 ]
