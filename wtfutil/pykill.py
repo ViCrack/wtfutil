@@ -4,11 +4,11 @@
 pykill - 根据脚本名或命令行模式终止 Python 进程的命令行工具
 
 用法示例：
-    pykill myscript.py                    # 按脚本路径终止（支持相对/绝对路径）
-    pykill C:\\path\\to\\myscript.py       # 绝对路径精确匹配
-    pykill -c "worker --queue"            # 模糊匹配命令行子串
-    pykill -f myscript.py                 # 仅查找进程，不终止
-    pykill -n myscript.py                 # 模拟运行，显示将要终止的进程
+    pykill                                # 列出所有 Python 进程
+    pykill myscript.py                    # 列出匹配并直接终止
+    pykill -c "worker --queue"            # 按命令行子串匹配
+    pykill -l                             # 仅列出所有 Python 进程（同无参数）
+    pykill myscript.py -l                 # 仅列出匹配进程，不终止
 """
 
 import argparse
@@ -22,6 +22,7 @@ from rich import box
 from .procutil import (
     find_python_process_details_by_script,
     find_python_process_details_by_cmdline,
+    list_all_python_process_details,
 )
 
 console = Console()
@@ -71,35 +72,48 @@ def _kill_pids(pids: list) -> bool:
 def main() -> int:
     parser = argparse.ArgumentParser(
         prog="pykill",
-        description="根据脚本名或命令行模式终止 Python 进程（支持 python/pythonw）",
+        description="终止 Python 进程。不加参数时列出所有 Python 进程。",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=(
+            "示例:\n"
+            "  pykill                   列出所有 Python 进程\n"
+            "  pykill myscript.py       匹配并直接终止进程\n"
+            "  pykill myscript.py -l    仅列出匹配进程\n"
+            "  pykill -c worker         按命令行子串匹配\n"
+        ),
     )
     parser.add_argument(
         "target",
-        help="脚本路径（默认）或命令行匹配模式（配合 -c 使用）",
+        nargs="?",
+        default=None,
+        metavar="PATTERN",
+        help="脚本路径或命令行匹配串（省略则列出所有 Python 进程）",
     )
     parser.add_argument(
         "-c", "--cmdline",
         action="store_true",
-        default=False,
-        help="使用命令行子串模糊匹配，而非脚本路径匹配",
+        help="按命令行子串匹配，而非脚本路径匹配",
     )
     parser.add_argument(
-        "-f", "--find",
+        "-l", "--list",
         action="store_true",
-        default=False,
-        help="仅查找并显示匹配进程，不执行终止",
+        dest="list_only",
+        help="仅列出匹配进程，不执行终止",
     )
-    parser.add_argument(
-        "-n", "--dry-run",
-        action="store_true",
-        default=False,
-        dest="dry_run",
-        help="模拟运行：显示将要终止的进程，但不实际终止",
-    )
-
     args = parser.parse_args()
-    mode = "cmdline 模糊匹配" if args.cmdline else "脚本路径匹配"
 
+    # 无 target：列出所有 Python 进程
+    if args.target is None:
+        details = list_all_python_process_details()
+        if not details:
+            console.print("[bold yellow]当前没有运行中的 Python 进程。[/bold yellow]")
+            return 0
+        table = _build_table(details, title=f"所有 Python 进程（共 {len(details)} 个）")
+        console.print(table)
+        return 0
+
+    # 有 target：按模式查找
+    mode = "命令行匹配" if args.cmdline else "脚本路径匹配"
     if args.cmdline:
         details = find_python_process_details_by_cmdline(args.target)
     else:
@@ -114,15 +128,11 @@ def main() -> int:
 
     table = _build_table(
         details,
-        title=f"匹配到 {len(details)} 个进程  [{mode}]  目标: {args.target!r}",
+        title=f"匹配到 {len(details)} 个进程  [{mode}]  {args.target!r}",
     )
     console.print(table)
 
-    if args.find:
-        return 0
-
-    if args.dry_run:
-        console.print("[bold yellow]模拟运行，未实际终止任何进程。[/bold yellow]")
+    if args.list_only:
         return 0
 
     console.print(f"\n[bold]正在终止 {len(details)} 个进程...[/bold]")

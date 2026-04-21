@@ -430,6 +430,27 @@ def kill_python_processes_by_cmdline(pattern: str) -> bool:
     return success
 
 
+def list_all_python_process_details() -> List[dict]:
+    """
+    枚举系统中所有 Python 进程，返回详情字典列表。
+
+    每个字典包含：pid, name, script, script_abs, cwd, cmdline
+
+    Returns:
+        所有 Python 进程的详情列表
+    """
+    results: List[dict] = []
+    for proc in psutil.process_iter(['pid', 'name', 'cmdline', 'cwd']):
+        try:
+            info = proc.info
+            if not _is_python_process(info.get('name') or ''):
+                continue
+            results.append(_build_proc_detail(info))
+        except (psutil.NoSuchProcess, psutil.AccessDenied):
+            continue
+    return results
+
+
 __all__ = [
     'find_process_by_name',
     'suspend_process',
@@ -443,4 +464,5 @@ __all__ = [
     'find_python_processes_by_cmdline',
     'find_python_process_details_by_cmdline',
     'kill_python_processes_by_cmdline',
+    'list_all_python_process_details',
 ]
