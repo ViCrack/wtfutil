@@ -15,6 +15,7 @@ import argparse
 import sys
 
 import psutil
+import questionary
 from rich.console import Console
 from rich.table import Table
 from rich import box
@@ -102,7 +103,7 @@ def main() -> int:
     )
     args = parser.parse_args()
 
-    # 无 target：列出所有 Python 进程
+    # 无 target：列出所有 Python 进程，交互式多选后 kill
     if args.target is None:
         details = list_all_python_process_details()
         if not details:
@@ -110,6 +111,29 @@ def main() -> int:
             return 0
         table = _build_table(details, title=f"所有 Python 进程（共 {len(details)} 个）")
         console.print(table)
+
+        if args.list_only:
+            return 0
+
+        choices = [
+            questionary.Choice(
+                title=f"[{d['pid']}] {d['script'] or d['name']}  {d['cmdline'][:60]}",
+                value=d["pid"],
+            )
+            for d in details
+        ]
+        selected_pids = questionary.checkbox(
+            "选择要 kill 的进程（空格选中，回车确认，Ctrl+C 取消）：",
+            choices=choices,
+        ).ask()
+
+        if not selected_pids:
+            console.print("[yellow]未选择任何进程，已取消。[/yellow]")
+            return 0
+
+        console.print(f"\n[bold]正在终止 {len(selected_pids)} 个进程...[/bold]")
+        _kill_pids(selected_pids)
+        console.print("[bold green]完成。[/bold green]")
         return 0
 
     # 有 target：按模式查找
