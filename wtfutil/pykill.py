@@ -12,6 +12,7 @@ pykill - 根据脚本名或命令行模式终止 Python 进程的命令行工具
 """
 
 import argparse
+import os
 import sys
 
 import psutil
@@ -103,9 +104,11 @@ def main() -> int:
     )
     args = parser.parse_args()
 
+    self_pid = os.getpid()
+
     # 无 target：列出所有 Python 进程，交互式多选后 kill
     if args.target is None:
-        details = list_all_python_process_details()
+        details = [d for d in list_all_python_process_details() if d.get("pid") != self_pid]
         if not details:
             console.print("[bold yellow]当前没有运行中的 Python 进程。[/bold yellow]")
             return 0
@@ -139,9 +142,9 @@ def main() -> int:
     # 有 target：按模式查找
     mode = "命令行匹配" if args.cmdline else "脚本路径匹配"
     if args.cmdline:
-        details = find_python_process_details_by_cmdline(args.target)
+        details = [d for d in find_python_process_details_by_cmdline(args.target) if d.get("pid") != self_pid]
     else:
-        details = find_python_process_details_by_script(args.target)
+        details = [d for d in find_python_process_details_by_script(args.target) if d.get("pid") != self_pid]
 
     if not details:
         console.print(
