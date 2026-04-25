@@ -17,7 +17,6 @@ from typing import Callable, List, Generator, Tuple, Optional, Union, Dict, Any,
 from urllib.parse import urljoin
 from urllib.parse import urlparse
 
-import faker
 from fake_useragent import UserAgent
 import requests
 import tldextract
@@ -32,6 +31,35 @@ from requests_toolbelt.utils import dump
 from rich.progress import Progress
 
 from .strutil import *
+
+# 常见住宅/商业 IP 段 (第一、第二字节)，避免数据中心/保留地址段
+# 格式: (octet1, octet2_base, octet2_range)  最终第二字节 = octet2_base + randint(0, octet2_range-1)
+_RESIDENTIAL_IP_PREFIXES: List[Tuple[int, int, int]] = [
+    # 中国电信
+    (113, 96,  32), (114, 80,  16), (115, 192, 32), (116, 224, 16),
+    (117, 136, 16), (118, 112, 16), (119, 96,  16), (120, 192, 16),
+    (121, 32,  16), (122, 192, 32),
+    # 中国联通
+    (112, 64,  16), (113, 0,   16), (116, 112, 16), (119, 112, 16),
+    (120, 64,  16),
+    # 中国移动
+    (111, 0,   16), (112, 0,   16), (117, 128, 16), (120, 128, 16),
+    (183, 192, 32),
+    # 美国住宅常见段
+    (24,  0,   16), (50,  64,  16), (68,  0,   16), (71,  0,   16),
+    (72,  0,   16), (73,  0,   16), (76,  0,   16), (96,  0,   16),
+    (98,  0,   16), (99,  0,   16), (107, 0,   16), (108, 0,   16),
+]
+
+
+def _random_fake_ip() -> str:
+    """从住宅/商业 IP 段中随机生成一个 IPv4 地址。"""
+    o1, o2_base, o2_range = random.choice(_RESIDENTIAL_IP_PREFIXES)
+    o2 = o2_base + random.randint(0, o2_range - 1)
+    o3 = random.randint(0, 255)
+    o4 = random.randint(1, 254)
+    return f"{o1}.{o2}.{o3}.{o4}"
+
 
 _http_context = threading.local()
 
@@ -596,11 +624,16 @@ def requests_session(
     )
     if fake_ip:
         if isinstance(fake_ip, bool):
-            fake = faker.Faker('zh_CN')
-            fake_ip = fake.ipv4()
+            fake_ip = _random_fake_ip()
         session.headers.update(
             {
                 'X-Forwarded-For': fake_ip,
+                'X-Real-IP': fake_ip,
+                'X-Originating-IP': fake_ip,
+                'X-Client-IP': fake_ip,
+                'True-Client-IP': fake_ip,
+                'CF-Connecting-IP': fake_ip,
+                'Forwarded': f'for={fake_ip}',
             }
         )
     session.verify = False
