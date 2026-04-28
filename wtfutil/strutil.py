@@ -11,6 +11,8 @@ import random
 import re
 import string
 import sys
+import unicodedata
+from functools import lru_cache
 from typing import Any
 from io import BytesIO
 from urllib.parse import unquote, quote
@@ -640,41 +642,73 @@ def utf7_encode(text, segment_size=None):
     return "".join(encoded_segments)
 
 
-GHOST_BITS_CJK_RANGES = (
-    (0x4E00, 0x9FFF),  # CJK Unified Ideographs
-    (0x3400, 0x4DBF),  # CJK Unified Ideographs Extension A
-    (0x20000, 0x2A6DF),  # CJK Unified Ideographs Extension B
+# Ghost Bits 候选字符范围：
+# - 只选 BMP 内字符，匹配 Java char / UTF-16 code unit 被窄化成 byte 的典型场景。
+# - 不使用 U+20000 以上的补充平面字符，因为它们在 Java 中会拆成 surrogate pair。
+# - 不直接使用整段 BMP，避免抽到零宽字符、组合符、私用区、未分配字符等不可见字符。
+# - 这里选取常见字体通常可显示的文字块，并在生成时再用 Unicode category 做二次过滤。
+GHOST_BITS_VISIBLE_RANGES = (
+    (0x0100, 0x017F),  # 拉丁扩展 A，例如 ō/Ř/Ŗ/Ŭ -> M/X/V/l
+    (0x4E00, 0x9FA5),  # 常见 CJK 统一表意文字，中文字体覆盖更稳定
 )
+
+GHOST_BITS_RANGES = GHOST_BITS_VISIBLE_RANGES
+
+
+def _is_ghost_bits_visible_char(code_point: int) -> bool:
+    """
+    判断候选字符是否适合作为“可见字符”输出。
+
+    过滤规则：
+    - C*: Other，包含控制字符、格式字符、surrogate、私用区、未分配字符。
+    - M*: Mark，组合符号，单独显示时可能不可见或叠加到前一个字符。
+    - Z*: Separator，空格、换行类分隔符，不适合作为肉眼可见 payload。
+
+    注意：这只能避免明显不可见字符，不能保证所有终端/浏览器字体都一定有字形。
+    """
+    category = unicodedata.category(chr(code_point))
+    return category[0] not in {'C', 'M', 'Z'}
+
+
+@lru_cache(maxsize=256)
+def _ghost_bits_candidates(byte_value: int) -> tuple[int, ...]:
+    candidates = []
+    for start, end in GHOST_BITS_RANGES:
+        first = start + ((byte_value - start) & 0xFF)
+        candidates.extend(
+            code_point
+            for code_point in range(first, end + 1, 0x100)
+            if _is_ghost_bits_visible_char(code_point)
+        )
+    return tuple(candidates)
 
 
 def ghost_bits_byte(byte_value: int) -> str:
     """
-    将单个 8-bit 值反推为低 8 位相同的随机中文字符。
+    将单个 8-bit 值反推为低 8 位相同的随机 Unicode 字符。
 
     参考：https://i.blackhat.com/Asia-26/Presentations/Asia-26-Bai-Cast-Attack-Ghost-Bits-4.23.pdf
     Ghost Bits 原理：例如 U+4E30（丰）低 8 位是 0x30，Java 等场景窄化为 byte
     时会丢弃高位，因此可能被转换回 ASCII 字符 '0'。
+    默认仅从 BMP 内的常见可见字符块选择字符，避免补充平面字符在 Java UTF-16 中拆成 surrogate pair。
     """
     if not 0 <= byte_value <= 0xFF:
         raise ValueError("byte_value 必须在 0x00-0xff 范围内")
 
-    candidates = []
-    for start, end in GHOST_BITS_CJK_RANGES:
-        first = start + ((byte_value - start) & 0xFF)
-        candidates.extend(range(first, end + 1, 0x100))
-
+    candidates = _ghost_bits_candidates(byte_value)
     if not candidates:
-        raise ValueError(f"无法为 0x{byte_value:02x} 找到低 8 位相同的中文字符")
+        raise ValueError(f"无法为 0x{byte_value:02x} 找到低 8 位相同的 Unicode 字符")
 
     return chr(random.choice(candidates))
 
 
 def ghost_bits_encode(data: str | bytes | bytearray | memoryview, encoding: str | None = 'utf-8') -> str:
     """
-    将 ASCII/8-bit 数据转换为低 8 位相同的随机中文字符。
+    将 ASCII/8-bit 数据转换为低 8 位相同的随机 Unicode 字符。
 
     - bytes/bytearray/memoryview：逐字节转换。
     - str：默认先按 UTF-8 转 bytes，再逐字节转换，可保留中文等 Unicode 文本。
+      例如 "中文.jsp" 会先变成 UTF-8 字节，再为每个字节挑选低 8 位相同的可见 Unicode 字符。
     - encoding：仅用于 str 需要按指定编码转 bytes 的场景；传 None 则按字符 ord 转换，ord(char) > 0xff 的字符会跳过。
 
     示例：
@@ -710,13 +744,37 @@ def ghost_bits_decode(data: str, encoding: str = 'utf-8', errors: str = 'ignore'
 
 
 def main():
-    raw = "公关广告.jsp"
-    encoded = ghost_bits_encode(raw)
-    print(f"raw: {raw}")
-    print(f"ghost bits: {encoded}")
-    print(f"decode: {ghost_bits_decode(encoded)}")
-    c = ghost_bits_encode('j')
-    print(f"case: 37.{c}sp -> {ghost_bits_decode(f'37.{c}sp')}")
+    samples = (
+        "class",
+        "../etc/passwd",
+        "1.jsp",
+        "MXVl",
+        "公关广告.jsp",
+    )
+
+    for raw in samples:
+        encoded = ghost_bits_encode(raw)
+        print(f"raw: {raw}")
+        print(f"ghost bits: {encoded}")
+        print(f"decode: {ghost_bits_decode(encoded)}")
+        print(f"bytes: {ghost_bits_decode_to_bytes(encoded)!r}")
+        print()
+
+    fixed_cases = (
+        ("㹣౬ᙡ⑳⑳", "Spring4Shell keyword"),
+        ("ōŘŖŬ", "Base64 alphabet"),
+        ("1.陪sp", "filename suffix"),
+    )
+
+    for payload, desc in fixed_cases:
+        print(f"{desc}: {payload} -> {ghost_bits_decode(payload)}")
+
+    utf8_raw = "中文.jsp"
+    utf8_encoded = ghost_bits_encode(utf8_raw)
+    print(f"utf-8 raw: {utf8_raw}")
+    print(f"utf-8 ghost bits: {utf8_encoded}")
+    print(f"utf-8 bytes: {ghost_bits_decode_to_bytes(utf8_encoded)!r}")
+    print(f"utf-8 decode: {ghost_bits_decode(utf8_encoded)}")
 
 
 __all__ = [
