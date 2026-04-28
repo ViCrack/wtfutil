@@ -640,6 +640,85 @@ def utf7_encode(text, segment_size=None):
     return "".join(encoded_segments)
 
 
+GHOST_BITS_CJK_RANGES = (
+    (0x4E00, 0x9FFF),  # CJK Unified Ideographs
+    (0x3400, 0x4DBF),  # CJK Unified Ideographs Extension A
+    (0x20000, 0x2A6DF),  # CJK Unified Ideographs Extension B
+)
+
+
+def ghost_bits_byte(byte_value: int) -> str:
+    """
+    将单个 8-bit 值反推为低 8 位相同的随机中文字符。
+
+    参考：https://i.blackhat.com/Asia-26/Presentations/Asia-26-Bai-Cast-Attack-Ghost-Bits-4.23.pdf
+    Ghost Bits 原理：例如 U+4E30（丰）低 8 位是 0x30，Java 等场景窄化为 byte
+    时会丢弃高位，因此可能被转换回 ASCII 字符 '0'。
+    """
+    if not 0 <= byte_value <= 0xFF:
+        raise ValueError("byte_value 必须在 0x00-0xff 范围内")
+
+    candidates = []
+    for start, end in GHOST_BITS_CJK_RANGES:
+        first = start + ((byte_value - start) & 0xFF)
+        candidates.extend(range(first, end + 1, 0x100))
+
+    if not candidates:
+        raise ValueError(f"无法为 0x{byte_value:02x} 找到低 8 位相同的中文字符")
+
+    return chr(random.choice(candidates))
+
+
+def ghost_bits_encode(data: str | bytes | bytearray | memoryview, encoding: str | None = 'utf-8') -> str:
+    """
+    将 ASCII/8-bit 数据转换为低 8 位相同的随机中文字符。
+
+    - bytes/bytearray/memoryview：逐字节转换。
+    - str：默认先按 UTF-8 转 bytes，再逐字节转换，可保留中文等 Unicode 文本。
+    - encoding：仅用于 str 需要按指定编码转 bytes 的场景；传 None 则按字符 ord 转换，ord(char) > 0xff 的字符会跳过。
+
+    示例：
+        ghost_bits_encode("0") 可能返回 "丰" 或其它低 8 位为 0x30 的中文字符。
+    """
+    if isinstance(data, (bytes, bytearray, memoryview)):
+        byte_values = bytes(data)
+    elif isinstance(data, str):
+        if encoding is None:
+            byte_values = bytes(ord(char) for char in data if ord(char) <= 0xFF)
+        else:
+            byte_values = data.encode(encoding, errors='ignore')
+    else:
+        raise TypeError("data 必须是 str/bytes/bytearray/memoryview")
+
+    return ''.join(ghost_bits_byte(value) for value in byte_values)
+
+
+def ghost_bits_decode_to_bytes(data: str) -> bytes:
+    """
+    将 Ghost Bits 字符串反转为低 8 位 bytes。
+    例如 "丰" -> b"0"，"37.陪sp" -> b"37.jsp"。
+    """
+    return bytes(ord(char) & 0xFF for char in data)
+
+
+def ghost_bits_decode(data: str, encoding: str = 'utf-8', errors: str = 'ignore') -> str:
+    """
+    将 Ghost Bits 字符串反转为文本。
+    默认按 UTF-8 还原文本；如需无损保留任意 0x00-0xff 字节，可用 ghost_bits_decode_to_bytes()。
+    """
+    return ghost_bits_decode_to_bytes(data).decode(encoding, errors=errors)
+
+
+def main():
+    raw = "公关广告.jsp"
+    encoded = ghost_bits_encode(raw)
+    print(f"raw: {raw}")
+    print(f"ghost bits: {encoded}")
+    print(f"decode: {ghost_bits_decode(encoded)}")
+    c = ghost_bits_encode('j')
+    print(f"case: 37.{c}sp -> {ghost_bits_decode(f'37.{c}sp')}")
+
+
 __all__ = [
     # --- 函数 ---
     'tobytes',
@@ -679,4 +758,12 @@ __all__ = [
     'align_text',
     'utf8_overlong_encoding',
     'utf7_encode',
+    'ghost_bits_byte',
+    'ghost_bits_encode',
+    'ghost_bits_decode_to_bytes',
+    'ghost_bits_decode',
 ]
+
+
+if __name__ == '__main__':
+    main()
