@@ -16,6 +16,7 @@ from .procutil import *
 from .notifyutil import *
 from .singleinstance import *
 from .translateutil import *
+from .imgutil import *
 
 
 class UniqueQueue(queue.Queue):

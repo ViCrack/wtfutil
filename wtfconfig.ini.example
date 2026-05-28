@@ -1,0 +1,10 @@
+[notify]
+# 通知配置示例，键名与 notifyutil.push_config 一致
+# FEISHU_KEY = your_key
+
+[img]
+# 随机头像 apihz 源（可选；未配置则仅使用 loliapi / horosama）
+APIHZ_IMG_ID = your_id
+APIHZ_IMG_KEY = your_key
+# APIHZ_IMGTYPE = 5
+# APIHZ_IMG_TYPE = 1

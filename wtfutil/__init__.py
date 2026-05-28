@@ -12,6 +12,7 @@ from .procutil import *
 from .sqlutil import *
 from .strutil import *
 from .translateutil import *
+from .imgutil import *
 from .util import *
 from .singleinstance import *
 
@@ -24,6 +25,7 @@ __all__ = (
     sqlutil.__all__ +
     strutil.__all__ +
     translateutil.__all__ +
+    imgutil.__all__ +
     util.__all__ +
     singleinstance.__all__
 )

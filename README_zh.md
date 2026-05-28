@@ -1,9 +1,18 @@
-# wtfutil 公开 API 参考（单文件）
+# wtfutil 使用说明与 API 参考（中文）
 
-> **用途**：给人阅读或作为 AI / Agent 的上下文，快速了解包内**正式导出**的符号（以各子模块 `__all__` 为准）。  
-> **版本**：以 `setup.py` 中的 `__version__` 为准。  
-> **更完整的示例**：见根目录 `README.md`（英文）、`README_zh.md`（中文）。  
-> **项目结构速览**：见 `AGENTS.md`。  
+<a href="https://pypi.python.org/pypi/wtfutil"><img src="https://img.shields.io/pypi/v/wtfutil.svg"></a>
+<a href="https://pypi.python.org/pypi/wtfutil"><img src="https://img.shields.io/pypi/pyversions/wtfutil.svg"></a>
+
+> **版本**：1.2.17（以 PyPI / `setup.py` 中 `__version__` 为准）  
+> **正式导出符号**：以各子模块 `__all__` 为准。  
+> **英文文档**：[README.md](./README.md)  
+> **项目结构速览**（开发仓库）：`AGENTS.md`  
+
+**wtfutil** 是面向日常脚本与自动化场景的 Python 工具库，涵盖 HTTP、文件、字符串与加解密、数据库、Windows 进程、多通道通知、翻译、随机图片等。
+
+```bash
+pip install wtfutil
+```
 
 ---
 
@@ -25,12 +34,71 @@ from wtfutil import util
 **按子模块精细导入**：
 
 ```python
-from wtfutil import httputil, fileutil, strutil, sqlutil, procutil, notifyutil, translateutil, singleinstance, util
+from wtfutil import httputil, fileutil, strutil, sqlutil, procutil, notifyutil, translateutil, imgutil, singleinstance, util
 ```
 
 ---
 
-## 2. 模块总览
+## 2. 使用示例
+
+推荐 `from wtfutil import util`，与 `from wtfutil import httputil` 等子模块等价能力均可通过 `util` 访问。
+
+### HTTP
+
+```python
+from wtfutil import util
+
+req = util.requests_session(proxies=10809, timeout=30)
+r = req.get("https://example.com/")
+```
+
+### 文件
+
+```python
+from wtfutil import util
+
+lines = util.read_lines(util.get_resource("urls.txt"), unique=True)
+util.write_json("out.json", {"ok": True})
+```
+
+### 通知
+
+```python
+from wtfutil import util, notifyutil
+
+util.send("告警", "任务执行完成")
+
+notifyutil.feishu_bot("标题", "正文")
+notifyutil.showdoc("标题", "正文")
+```
+
+配置见本文末尾 **配置** 章节；`wtfconfig.ini` 的 `[notify]` 段或同名环境变量。
+
+### 随机头像（imgutil）
+
+```python
+from wtfutil import util
+
+data = util.random_avatar_bytes()
+with open("avatar.jpg", "wb") as f:
+    f.write(data)
+```
+
+### 单实例
+
+```python
+from wtfutil import single_instance, SingleInstanceException
+
+try:
+    with single_instance(flavor_id="job"):
+        ...
+except SingleInstanceException:
+    print("已有实例在运行")
+```
+
+---
+
+## 3. 模块总览
 
 | 模块 | 说明 |
 |------|------|
@@ -42,11 +110,12 @@ from wtfutil import httputil, fileutil, strutil, sqlutil, procutil, notifyutil, 
 | `wtfutil.procutil` | Windows 进程查找、挂起/恢复（仅 Windows） |
 | `wtfutil.notifyutil` | 多通道通知、`push_config`、`send` 聚合推送 |
 | `wtfutil.translateutil` | 百度翻译 API 封装 |
+| `wtfutil.imgutil` | 随机头像拉取（多源回退）、`img_config` |
 | `wtfutil.singleinstance` | 单实例锁（文件锁 + portalocker） |
 
 ---
 
-## 3. `wtfutil.util`
+## 4. `wtfutil.util`
 
 ### 类
 
@@ -85,13 +154,13 @@ q.put({"url": "https://a.com"})   # dict 内容相同 → 忽略
 
 **`get_resource` 示例**：配置文件、黑名单等与脚本相对位置无关时，把文件放在 `resource/` 或用户家目录即可被找到（见第 5 节 `read_lines` 联用）。
 
-> `util` 还通过 `from .xxx import *` 再导出了 **httputil / fileutil / strutil / sqlutil / procutil / notifyutil / singleinstance / translateutil** 的全部公开符号，因此 `util.requests_session` 等与对应子模块一致。
+> `util` 还通过 `from .xxx import *` 再导出了 **httputil / fileutil / strutil / sqlutil / procutil / notifyutil / singleinstance / translateutil / imgutil** 的全部公开符号，因此 `util.requests_session` 等与对应子模块一致。
 
 ---
 
-## 4. `wtfutil.httputil`
+## 5. `wtfutil.httputil`
 
-### 4.0 模块副作用（导入即生效）
+### 5.0 模块副作用（导入即生效）
 
 导入 `httputil` 时会做这些事（无需你手动调用）：
 
@@ -103,7 +172,7 @@ q.put({"url": "https://a.com"})   # dict 内容相同 → 忽略
 
 ---
 
-### 4.1 `requests_session()`（重点）
+### 5.1 `requests_session()`（重点）
 
 工厂函数，返回一个已配置好的会话实例。类型为以下之一：
 
@@ -246,7 +315,7 @@ s = httputil.requests_session(chunked=httputil.ChunkedConfig.aggressive())
 
 ---
 
-### 4.2 `RequestsSession` 与 Hook
+### 5.2 `RequestsSession` 与 Hook
 
 `RequestsSession` 在 `prepare_request` 阶段若未显式提供，会自动补 **`Referer`**、**`Origin`**（根据 URL 的 scheme + netloc）。
 
@@ -257,7 +326,7 @@ s = httputil.requests_session(chunked=httputil.ChunkedConfig.aggressive())
 
 ---
 
-### 4.3 `httpraw(raw, ssl=False, **kwargs)`
+### 5.3 `httpraw(raw, ssl=False, **kwargs)`
 
 将 **文本形式** 的 HTTP 报文发给服务器。
 
@@ -288,7 +357,7 @@ resp = httputil.httpraw(raw, ssl=True, timeout=10)
 
 ---
 
-### 4.4 其它导出符号（速查）
+### 5.4 其它导出符号（速查）
 
 | 符号 | 说明 |
 |------|------|
@@ -309,9 +378,9 @@ resp = httputil.httpraw(raw, ssl=True, timeout=10)
 
 ---
 
-## 5. `wtfutil.fileutil`
+## 6. `wtfutil.fileutil`
 
-### 5.1 读写与哈希
+### 6.1 读写与哈希
 
 | 符号 | 参数要点 | 说明 |
 |------|----------|------|
@@ -339,17 +408,17 @@ domains = util.read_lines("./state/domains.txt", not_exists_ok=True)
 html = util.read_text("page.html", errors="backslashreplace")
 ```
 
-### 5.2 `JarAnalyzer`
+### 6.2 `JarAnalyzer`
 
 构造时传入 `.jar` 路径；自动分析 JDK 版本线索、是否 Spring Boot、是否偏 GUI（`javaw`）、`Main-Class` / 可执行 JAR 等。部分分支依赖本机安装 **`javap`**。
 
-### 5.3 与 `httputil` 联用
+### 6.3 与 `httputil` 联用
 
 从文件读入 URL 或域名列表后，常用 **`httputil.get_maindomain`** 归一化主域名；配合 **`util.UniqueQueue`**（见第 3 节）可做去重抓取队列（Crawler 里常见组合）。
 
 ---
 
-## 6. `wtfutil.strutil`
+## 7. `wtfutil.strutil`
 
 | 类别 | 符号 |
 |------|------|
@@ -362,7 +431,7 @@ html = util.read_text("page.html", errors="backslashreplace")
 
 ---
 
-## 7. `wtfutil.sqlutil`
+## 8. `wtfutil.sqlutil`
 
 ### 类
 
@@ -387,7 +456,7 @@ html = util.read_text("page.html", errors="backslashreplace")
 
 ---
 
-## 8. `wtfutil.procutil`（Windows）
+## 9. `wtfutil.procutil`（Windows）
 
 | 符号 | 说明 |
 |------|------|
@@ -397,7 +466,7 @@ html = util.read_text("page.html", errors="backslashreplace")
 
 ---
 
-## 9. `wtfutil.notifyutil`
+## 10. `wtfutil.notifyutil`
 
 ### 配置
 
@@ -405,7 +474,7 @@ html = util.read_text("page.html", errors="backslashreplace")
 |------|------|
 | `push_config` | 配置字典：内置默认值 ← `wtfconfig.ini` `[notify]` ← 环境变量（环境变量优先） |
 
-配置文件搜索与 `util.get_resource("wtfconfig.ini")` 一致：当前工作目录、`resource/wtfconfig.ini`、`~/wtfconfig.ini`。详细 key 见 `README.md` / `README_zh.md`。
+配置文件搜索与 `util.get_resource("wtfconfig.ini")` 一致：当前工作目录、`resource/wtfconfig.ini`、`~/wtfconfig.ini`。常用 key 见本文 **配置** 章节。
 
 ### 聚合发送
 
@@ -419,7 +488,7 @@ html = util.read_text("page.html", errors="backslashreplace")
 
 ---
 
-## 10. `wtfutil.translateutil`
+## 11. `wtfutil.translateutil`
 
 | 符号 | 说明 |
 |------|------|
@@ -427,7 +496,35 @@ html = util.read_text("page.html", errors="backslashreplace")
 
 ---
 
-## 11. `wtfutil.singleinstance`
+## 12. `wtfutil.imgutil`
+
+| 符号 | 说明 |
+|------|------|
+| `img_config` | 配置字典：默认值 ← `wtfconfig.ini` `[img]` ← 环境变量（环境变量优先） |
+| `ImageFetchError` | 所有源均失败；`.errors` 为 `(provider_name, exc)` 列表 |
+| `fetch_random_bytes(fetchers, session=None, timeout=30, shuffle=True)` | 通用多 fetcher 回退 |
+| `random_avatar_bytes(session=None, timeout=30)` | 内置头像源随机顺序尝试，返回 `bytes`（直链/302：loliapi、dmoe、xjh、btstu、horosama；可选 apihz） |
+
+**配置键**（`[img]` 段或同名环境变量）：
+
+| 键 | 说明 |
+|----|------|
+| `APIHZ_IMG_ID` | apihz 接口 id（可选；未配置则跳过 apihz 源） |
+| `APIHZ_IMG_KEY` | apihz 接口 key |
+| `APIHZ_IMGTYPE` | 查询参数 `imgtype`，默认 `5` |
+| `APIHZ_IMG_TYPE` | 查询参数 `type`，默认 `1` |
+
+配置文件搜索与 `util.get_resource("wtfconfig.ini")` 一致。
+
+```python
+from wtfutil import util
+
+data = util.random_avatar_bytes()
+```
+
+---
+
+## 13. `wtfutil.singleinstance`
 
 | 符号 | 说明 |
 |------|------|
@@ -439,13 +536,50 @@ html = util.read_text("page.html", errors="backslashreplace")
 
 ---
 
-## 12. 包级 `wtfutil.__all__`
+## 14. 包级 `wtfutil.__all__`
 
-为以下子模块 `__all__` 的**拼接**（顺序：`fileutil`, `httputil`, `notifyutil`, `procutil`, `sqlutil`, `strutil`, `translateutil`, `util`, `singleinstance`）。若需确认是否导出某名称，以对应源文件末尾 `__all__` 为准。
+为以下子模块 `__all__` 的**拼接**（顺序：`fileutil`, `httputil`, `notifyutil`, `procutil`, `sqlutil`, `strutil`, `translateutil`, `imgutil`, `util`, `singleinstance`）。若需确认是否导出某名称，以对应源文件末尾 `__all__` 为准。
 
 ---
 
-## 13. 维护说明
+## 15. 配置（wtfconfig.ini / 环境变量）
 
-- 增删公开 API 时，请同步更新各模块 `__all__`，并修订本文件。
-- 自动化思路（可选）：用 `ast` 解析各文件 `__all__` 列表，或与 `inspect`/`pydoc` 结合生成草稿后再人工润色。
+`[notify]` 与 `[img]` 均通过 `util.get_resource("wtfconfig.ini")` 查找：当前工作目录、`resource/wtfconfig.ini`、`~/wtfconfig.ini`。**环境变量优先于 ini 文件。**
+
+```ini
+[notify]
+HITOKOTO = false
+CONSOLE = true
+BARK_PUSH =
+FEISHU_KEY =
+FEISHU_SECRET =
+DD_BOT_TOKEN =
+DD_BOT_SECRET =
+TG_BOT_TOKEN =
+TG_USER_ID =
+SMTP_SERVER =
+SMTP_EMAIL =
+SMTP_PASSWORD =
+SHOWDOC_KEY =
+WEBHOOK_URL =
+WEBHOOK_METHOD = POST
+WEBHOOK_CONTENT_TYPE = application/json
+WEBHOOK_BODY =
+
+[img]
+APIHZ_IMG_ID =
+APIHZ_IMG_KEY =
+```
+
+```powershell
+$env:FEISHU_KEY = "your_key"
+$env:APIHZ_IMG_ID = "your_id"
+$env:APIHZ_IMG_KEY = "your_key"
+```
+
+---
+
+## 16. 维护说明
+
+- 增删公开 API 时，请同步更新各模块 `__all__`，并修订 **README.md（英文）** 与 **README_zh.md（中文）**。
+- 开发仓库 `AGENTS.md` 规定：新增 API 时必须同步更新本目录文档。
