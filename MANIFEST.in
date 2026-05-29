@@ -1,0 +1,20 @@
+# sdist 仅在本机 python setup.py sdist 时使用；publish 默认只上传 wheel。
+# 即使打 sdist，也不把文档、测试、开发配置打进归档。
+
+global-exclude *.py[cod] *.so
+prune docs
+prune build
+prune dist
+prune htmlcov
+prune .git
+prune .git-rewrite
+prune .vscode
+prune .idea
+exclude wtfconfig.ini
+exclude test.py
+exclude tmp.py
+exclude .gitignore
+exclude ruff.toml
+
+include LICENSE
+include README.md

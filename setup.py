@@ -3,8 +3,10 @@
 """ """
 
 from setuptools import setup, Command
+import glob
 import io
 import os
+import subprocess
 import sys
 from shutil import rmtree
 
@@ -29,6 +31,7 @@ requires = [
     "pycryptodome",
     "portalocker",
     "psutil",
+    "questionary",
     "pywin32; platform_system == 'Windows'",
 ]
 
@@ -55,25 +58,53 @@ class PublishCommand(Command):
         pass
 
     def run(self):
+        build_dir = os.path.join(here, "build")
         try:
             self.status("Removing previous builds...")
             rmtree(os.path.join(here, "dist"))
         except FileNotFoundError:
             pass
 
-        self.status("Building Source and Wheel (universal) distribution...")
+        # 只构建并上传 wheel；wheel 内须含 wtfutil/*.py，否则 pip 无法 import。
+        self.status("Building wheel only (no sdist upload)...")
+        try:
+            subprocess.check_call(
+                [sys.executable, "setup.py", "bdist_wheel"],
+                cwd=here,
+            )
+        except subprocess.CalledProcessError as exc:
+            print("Build failed; not uploading or installing.")
+            sys.exit(exc.returncode or 1)
 
-        # pip install wheel twine
+        dist_files = sorted(glob.glob(os.path.join(here, "dist", "wtfutil-*.whl")))
+        if not dist_files:
+            print("No wheel in dist/ (expected wtfutil-*.whl); not uploading or installing.")
+            sys.exit(1)
 
-        os.system("{} setup.py bdist_wheel --universal".format(sys.executable))
+        wheel_path = dist_files[-1]
+        names = ", ".join(os.path.basename(f) for f in dist_files)
 
-        self.status("Uploading the package to PyPi via Twine...")
-        os.system("twine upload dist/*")
-        os.system("pip3 install .")
-        # 删除build文件夹
-        rmtree(os.path.join(here, "build"))
-        print("自动更新pip到最新版本")
-        sys.exit()
+        try:
+            self.status("Uploading to PyPI via Twine: {}".format(names))
+            subprocess.check_call(["twine", "upload", *dist_files])
+        except subprocess.CalledProcessError as exc:
+            print("PyPI upload failed; local install skipped.")
+            sys.exit(exc.returncode or 1)
+
+        # 仅在上传成功后再安装，且安装本次发布的 wheel（与 PyPI 产物一致）
+        self.status("Upload OK. Installing wheel: {}".format(os.path.basename(wheel_path)))
+        try:
+            subprocess.check_call(
+                [sys.executable, "-m", "pip", "install", "--upgrade", wheel_path],
+            )
+        except subprocess.CalledProcessError as exc:
+            print("PyPI upload succeeded, but local pip install failed.")
+            sys.exit(exc.returncode or 1)
+
+        if os.path.isdir(build_dir):
+            rmtree(build_dir)
+        print("Publish and install completed.")
+        sys.exit(0)
 
 
 setup(
@@ -86,32 +117,24 @@ setup(
     author_email=__contact__,
     url=__url__,
     packages=["wtfutil"],
-    include_package_data=True,
+    include_package_data=False,
     zip_safe=False,
-    license_file=__license__,
+    license=__license__,
     install_requires=requires,
     platforms="any",
     classifiers=[
         # See: https://pypi.python.org/pypi?:action=list_classifiers
         "Topic :: Utilities",
         "Intended Audience :: Developers",
-        "License :: OSI Approved :: BSD License",
+        "License :: OSI Approved :: GNU General Public License v3 or later (GPLv3+)",
         "Topic :: Software Development :: Libraries",
         "Development Status :: 5 - Production/Stable",
         "Operating System :: OS Independent",
-        # List of python versions and their support status:
-        # https://en.wikipedia.org/wiki/CPython#Version_history
-        "Programming Language :: Python :: 2.7",
         "Programming Language :: Python :: 3",
-        "Programming Language :: Python :: 3.4",
-        "Programming Language :: Python :: 3.5",
-        "Programming Language :: Python :: 3.6",
-        "Programming Language :: Python :: 3.7",
-        "Programming Language :: Python :: 3.8",
-        "Programming Language :: Python :: 3.9",
         "Programming Language :: Python :: 3.10",
         "Programming Language :: Python :: 3.11",
         "Programming Language :: Python :: 3.12",
+        "Programming Language :: Python :: 3.13",
         "Programming Language :: Python :: Implementation :: CPython",
         "Programming Language :: Python :: Implementation :: PyPy",
     ],
