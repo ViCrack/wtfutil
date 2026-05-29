@@ -19,3 +19,5 @@ from wtfutil import find_process_by_name, suspend_process
 | `find_python_process_details_by_cmdline(pattern)` | Details |
 | `kill_python_processes_by_cmdline(pattern)` | Kill matches |
 | `list_all_python_process_details()` | All Python processes |
+
+CLI wrapper: **[pykill](pykill.md)** (`pykill` on PATH after install).

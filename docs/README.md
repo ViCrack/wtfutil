@@ -14,6 +14,7 @@
 | `wtfutil.translateutil` | [en/translateutil.md](en/translateutil.md) | [zh/translateutil.md](zh/translateutil.md) |
 | `wtfutil.imgutil` | [en/imgutil.md](en/imgutil.md) | [zh/imgutil.md](zh/imgutil.md) |
 | `wtfutil.singleinstance` | [en/singleinstance.md](en/singleinstance.md) | [zh/singleinstance.md](zh/singleinstance.md) |
+| **`pykill`（CLI）** | [en/pykill.md](en/pykill.md) | [zh/pykill.md](zh/pykill.md) |
 
 **配置**：`wtfconfig.ini` 的 `[notify]` / `[img]` 段见 [notifyutil](zh/notifyutil.md) / [imgutil](zh/imgutil.md)，摘要见根 README。
 

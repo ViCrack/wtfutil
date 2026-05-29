@@ -1,27 +1,51 @@
 # wtfutil.singleinstance
 
-Single-instance lock via file lock + portalocker.
+Prevent more than one instance of a script on the same machine using a **non-blocking file lock** (`portalocker`). Lock file defaults to the OS temp directory.
 
 ```python
-from wtfutil import single_instance, SingleInstanceException
+from wtfutil import single_instance, SingleInstance, SingleInstanceException
 ```
+
+## Symbols
 
 | Symbol | Description |
 |--------|-------------|
-| `SingleInstanceException` | Raised when another instance holds the lock |
-| `SingleInstance` | Context manager: `with SingleInstance(flavor_id=..., lockfile=...):` |
-| `single_instance` | Decorator factory: `@single_instance(flavor_id="...")` |
+| `SingleInstanceException` | Raised when another instance already holds the lock |
+| `SingleInstance(flavor_id="", lockfile="")` | Context manager |
+| `single_instance(flavor_id="", lockfile="")` | Decorator factory |
 
-Lock file in OS temp dir, derived from script path + `flavor_id`.
+## Parameters
+
+| Parameter | Description |
+|-----------|-------------|
+| `flavor_id` | Optional suffix so the same script can run multiple single-instance “flavors” (e.g. `"worker"` vs `"scheduler"`) |
+| `lockfile` | Custom lock path; if empty, auto: `{tempdir}/{script_basename}[-{flavor_id}].lock` |
+
+Illegal path characters in the script path are normalized when building the default lock name.
+
+## Examples
 
 ```python
+# Context manager
 try:
-    with single_instance(flavor_id="my_job"):
+    with SingleInstance(flavor_id="my_job"):
         run_job()
 except SingleInstanceException:
     print("Already running")
 
+# Decorator
 @single_instance(flavor_id="my_job")
 def main():
     run_job()
+
+# Custom lock file
+with SingleInstance(lockfile="/var/run/myapp.lock"):
+    ...
 ```
+
+## Notes
+
+- Lock is acquired on `__enter__` with `LOCK_EX | LOCK_NB` (fail fast if busy).
+- On exit, unlocks and attempts to remove the lock file.
+- Design avoids some Windows multi-thread lock races (see module docstring / tendo discussion).
+- Test locally: `python -m wtfutil.singleinstance` runs a minimal loop until Ctrl+C.

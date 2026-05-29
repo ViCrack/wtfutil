@@ -98,8 +98,14 @@ from wtfutil import util       # 杂项工具（UniqueQueue、measure_time、get
 
 - `wtfutil/singleinstance.py`
   - 单实例运行控制：
-    - 上下文管理器形式：`with single_instance(flavor_id="job"): ...`
+    - 上下文管理器形式：`with SingleInstance(flavor_id="job"): ...`
     - 装饰器形式：`@single_instance(flavor_id="job")`
+    - 文档：`docs/en/singleinstance.md`、`docs/zh/singleinstance.md`
+
+- `wtfutil/pykill.py`
+  - **CLI 工具**（`setup.py` → `console_scripts`：`pykill=wtfutil.pykill:main`），**不在** `__init__.py` / `__all__`。
+  - 列出/终止 Python 进程，封装 `procutil` + Rich + questionary。
+  - 文档：`docs/en/pykill.md`、`docs/zh/pykill.md`；README 有「命令行与单实例」摘要。
 
 ---
 

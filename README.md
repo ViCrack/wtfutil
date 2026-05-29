@@ -40,6 +40,38 @@ Sub-module imports work as well: `from wtfutil import httputil, fileutil, notify
 
 ---
 
+## CLI & single-instance
+
+### `pykill` — kill Python processes (CLI)
+
+Installed as a console script (not in `wtfutil.__all__`). Wraps `procutil` with Rich tables and optional interactive selection.
+
+```bash
+pykill                          # list all Python processes, pick PIDs to kill
+pykill myscript.py              # kill by script path
+pykill myscript.py -l           # list only
+pykill -c "celery worker"       # match command-line substring
+```
+
+Details: [docs/en/pykill.md](docs/en/pykill.md) · [docs/zh/pykill.md](docs/zh/pykill.md)
+
+### `singleinstance` — one instance per script
+
+```python
+from wtfutil import single_instance, SingleInstanceException
+
+try:
+    with single_instance(flavor_id="my_job"):
+        run_job()
+except SingleInstanceException:
+    print("Already running")
+```
+
+`flavor_id` distinguishes multiple single-instance modes for the same script; lock file defaults to the system temp directory.  
+Details: [docs/en/singleinstance.md](docs/en/singleinstance.md) · [docs/zh/singleinstance.md](docs/zh/singleinstance.md)
+
+---
+
 ## Module Overview
 
 | Module | Description | API docs |
@@ -52,8 +84,9 @@ Sub-module imports work as well: `from wtfutil import httputil, fileutil, notify
 | `wtfutil.notifyutil` | Multi-channel notifications | [EN](docs/en/notifyutil.md) · [ZH](docs/zh/notifyutil.md) |
 | `wtfutil.translateutil` | Baidu Translate API | [EN](docs/en/translateutil.md) · [ZH](docs/zh/translateutil.md) |
 | `wtfutil.imgutil` | Random avatar fetch | [EN](docs/en/imgutil.md) · [ZH](docs/zh/imgutil.md) |
-| `wtfutil.singleinstance` | Single-instance lock | [EN](docs/en/singleinstance.md) · [ZH](docs/zh/singleinstance.md) |
+| `wtfutil.singleinstance` | Single-instance lock (`SingleInstance`, `@single_instance`) | [EN](docs/en/singleinstance.md) · [ZH](docs/zh/singleinstance.md) |
 | `wtfutil.util` | Misc helpers, `get_resource` | [EN](docs/en/util.md) · [ZH](docs/zh/util.md) |
+| **`pykill`** (CLI) | List/kill Python processes (uses `procutil`) | [EN](docs/en/pykill.md) · [ZH](docs/zh/pykill.md) |
 
 All public symbols are also exported at package top level (`from wtfutil import read_text, ...`). See `wtfutil/__init__.py` `__all__`.
 

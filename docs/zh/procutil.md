@@ -21,3 +21,5 @@ from wtfutil import find_process_by_name, suspend_process
 | `find_python_process_details_by_cmdline(pattern)` | 详细信息 |
 | `kill_python_processes_by_cmdline(pattern)` | 结束匹配 |
 | `list_all_python_process_details()` | 列出所有 Python 进程详情 |
+
+命令行封装见 **[pykill](pykill.md)**（`pip install` 后执行 `pykill`）。
