@@ -1,5 +1,7 @@
 ## wtfutil 项目概览（给 AI / Agent 看）
 
+**文档根目录**：[`docs/`](docs/README.md)（按模块拆分的完整 API，`docs/en/` 英文、`docs/zh/` 中文）。
+
 本文件为 AI / Agent 提供 wtfutil 的项目结构速览与关键模块说明，便于在回答用户问题或修改代码时快速定位到合适的模块与示例。
 
 ---
@@ -27,7 +29,8 @@ from wtfutil import singleinstance # 单实例运行
 from wtfutil import util       # 杂项工具（UniqueQueue、measure_time、get_resource 等）
 ```
 
-在需要示例代码时，优先引用本仓库根目录的 **`README.md`（英文）** 与 **`README_zh.md`（中文）**。
+- **查详细 API**：优先打开 `docs/zh/<module>.md` 或 `docs/en/<module>.md`（如 `docs/zh/httputil.md`）。
+- **快速入门**：根目录 `README.md` / `README_zh.md`（安装、示例、模块索引链接）。
 
 ---
 
@@ -137,18 +140,18 @@ __init__.py（显式导出所有公开符号，不使用 wildcard import）
 
 1. 更新对应子模块的 `__all__`。
 2. 更新 `wtfutil/__init__.py` 的显式导入列表与 `__all__`。
-3. 更新本仓库根目录 `README.md`（英文，全量文档）。
-4. 更新本仓库根目录 `README_zh.md`（中文，全量文档）。
-5. 更新本文件 `AGENTS.md` 第 2 节中对应模块的简要说明。
-6. 若 `D:\Code\Python\wtfutil-readme\README.md` 存在，同步更新（**仅当文件已存在时**）。
+3. 更新 **`docs/en/<module>.md`** 与 **`docs/zh/<module>.md`**（该模块的完整 API 说明）。
+4. 若新增模块或配置段：更新根 `README.md` / `README_zh.md` 的模块索引表或配置摘要，并更新 [`docs/README.md`](docs/README.md) 索引。
+5. 更新本文件 `AGENTS.md` 第 2 节中对应模块的简要说明（一行级）。
 
 ---
 
 ### 6. 文档路径速查
 
-| 文件 | 用途 |
+| 路径 | 用途 |
 |------|------|
-| 本仓库 `README.md` | 面向用户的完整英文 API 文档与示例 |
-| 本仓库 `README_zh.md` | 面向用户的完整中文 API 文档与示例 |
-| 本仓库 `AGENTS.md` | Agent 项目结构与规则（本文件） |
-| `D:\Code\Python\wtfutil-readme\README.md` | 外部文档（仅当路径存在时同步更新） |
+| `docs/en/*.md` | 英文完整 API（按子模块） |
+| `docs/zh/*.md` | 中文完整 API（按子模块） |
+| `docs/README.md` | 文档模块索引（中英链接） |
+| `README.md` / `README_zh.md` | 快速入门 + 模块索引 + 配置摘要 |
+| `AGENTS.md` | Agent 项目结构与规则（本文件） |
