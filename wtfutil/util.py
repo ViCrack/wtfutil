@@ -9,7 +9,7 @@ from collections import defaultdict
 from functools import wraps
 from typing import Any, Dict, Iterable, List, Union
 
-from ._base import get_resource, get_resource_dir  # noqa: F401 – re-export
+from ._base import get_resource, get_resource_dir
 
 __all__ = [
     # data structures
