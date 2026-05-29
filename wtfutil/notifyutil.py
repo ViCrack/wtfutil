@@ -18,17 +18,19 @@ from pathlib import Path
 
 from configobj import ConfigObj
 import logging
-from . import util
+from ._base import get_resource
+from .httputil import requests_session, RequestsSession
 
 logger = logging.getLogger(__name__)
-logger.setLevel(logging.INFO)
-handler = logging.StreamHandler()  # 默认输出到 sys.stderr
-handler.setLevel(logging.INFO)  # 处理器也设置为 INFO
-formatter = logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s", datefmt="%Y-%m-%d %H:%M:%S")
-handler.setFormatter(formatter)
-logger.addHandler(handler)
 
-req = util.requests_session()
+_req: RequestsSession | None = None
+
+
+def _get_req() -> RequestsSession:
+    global _req
+    if _req is None:
+        _req = requests_session()
+    return _req
 
 # 通知服务
 # from qinglong
@@ -123,7 +125,7 @@ push_config = {
 notify_function = []
 
 # 读取配置文件
-config_path = util.get_resource('wtfconfig.ini')
+config_path = get_resource('wtfconfig.ini')
 
 if config_path and Path(config_path).exists():
     cfg = ConfigObj(config_path, encoding='UTF-8')
@@ -173,7 +175,7 @@ def bark(title: str, content: str) -> None:
         params += f"{bark_params.get(pair[0])}={pair[1]}&"
     if params:
         url = url + "?" + params.rstrip("&")
-    response = req.get(url).json()
+    response = _get_req().get(url).json()
 
     if response["code"] == 200:
         logger.debug("bark 推送成功！")
@@ -208,7 +210,7 @@ def dingding_bot(title: str, content: str) -> None:
     url = f'https://oapi.dingtalk.com/robot/send?access_token={push_config.get("DD_BOT_TOKEN")}&timestamp={timestamp}&sign={sign}'
     headers = {"Content-Type": "application/json;charset=utf-8"}
     data = {"msgtype": "text", "text": {"content": f"{title}\n\n{content}"}}
-    response = req.post(
+    response = _get_req().post(
         url=url, data=json.dumps(data), headers=headers, timeout=15
     ).json()
 
@@ -244,7 +246,7 @@ def feishu_text(content: str) -> None:
             'sign': sign
         })
 
-    response = req.post(url, json=data).json()
+    response = _get_req().post(url, json=data).json()
 
     if response.get("StatusCode") == 0:
         logger.debug("飞书 推送成功！")
@@ -293,7 +295,7 @@ def feishu_richtext(title: str, content: list) -> None:
             'sign': sign
         })
 
-    response = req.post(url, json=data).json()
+    response = _get_req().post(url, json=data).json()
 
     if response.get("StatusCode") == 0:
         logger.debug("飞书 推送成功！")
@@ -311,7 +313,7 @@ def go_cqhttp(title: str, content: str) -> None:
     logger.debug("go-cqhttp 服务启动")
 
     url = f'{push_config.get("GOBOT_URL")}?access_token={push_config.get("GOBOT_TOKEN")}&{push_config.get("GOBOT_QQ")}&message=标题:{title}\n内容:{content}'
-    response = req.get(url).json()
+    response = _get_req().get(url).json()
 
     if response["status"] == "ok":
         logger.debug("go-cqhttp 推送成功！")
@@ -334,7 +336,7 @@ def gotify(title: str, content: str) -> None:
         "message": content,
         "priority": push_config.get("GOTIFY_PRIORITY"),
     }
-    response = req.post(url, data=data).json()
+    response = _get_req().post(url, data=data).json()
 
     if response.get("id"):
         logger.debug("gotify 推送成功！")
@@ -354,7 +356,7 @@ def iGot(title: str, content: str) -> None:
     url = f'https://push.hellyw.com/{push_config.get("IGOT_PUSH_KEY")}'
     data = {"title": title, "content": content}
     headers = {"Content-Type": "application/x-www-form-urlencoded"}
-    response = req.post(url, data=data, headers=headers).json()
+    response = _get_req().post(url, data=data, headers=headers).json()
 
     if response["ret"] == 0:
         logger.debug("iGot 推送成功！")
@@ -376,7 +378,7 @@ def serverJ(title: str, content: str) -> None:
         url = f'https://sctapi.ftqq.com/{push_config.get("PUSH_KEY")}.send'
     else:
         url = f'https://sc.ftqq.com/{push_config.get("PUSH_KEY")}.send'
-    response = req.post(url, data=data).json()
+    response = _get_req().post(url, data=data).json()
 
     if response.get("errno") == 0 or response.get("code") == 0:
         logger.debug("serverJ 推送成功！")
@@ -402,7 +404,7 @@ def pushdeer(title: str, content: str) -> None:
     if push_config.get("DEER_URL"):
         url = push_config.get("DEER_URL")
 
-    response = req.post(url, data=data).json()
+    response = _get_req().post(url, data=data).json()
 
     if len(response.get("content").get("result")) > 0:
         logger.debug("PushDeer 推送成功！")
@@ -420,7 +422,7 @@ def chat(title: str, content: str) -> None:
     logger.debug("chat 服务启动")
     data = "payload=" + json.dumps({"text": title + "\n" + content})
     url = push_config.get("CHAT_URL") + push_config.get("CHAT_TOKEN")
-    response = req.post(url, data=data)
+    response = _get_req().post(url, data=data)
 
     if response.status_code == 200:
         logger.debug("Chat 推送成功！")
@@ -446,7 +448,7 @@ def pushplus_bot(title: str, content: str) -> None:
     }
     body = json.dumps(data).encode(encoding="utf-8")
     headers = {"Content-Type": "application/json"}
-    response = req.post(url=url, data=body, headers=headers).json()
+    response = _get_req().post(url=url, data=body, headers=headers).json()
 
     if response["code"] == 200:
         logger.debug("PUSHPLUS 推送成功！")
@@ -454,7 +456,7 @@ def pushplus_bot(title: str, content: str) -> None:
     else:
         url_old = "http://pushplus.hxtrip.com/send"
         headers["Accept"] = "application/json"
-        response = req.post(url=url_old, data=body, headers=headers).json()
+        response = _get_req().post(url=url_old, data=body, headers=headers).json()
 
         if response["code"] == 200:
             logger.debug("PUSHPLUS(hxtrip) 推送成功！")
@@ -474,7 +476,7 @@ def qmsg_bot(title: str, content: str) -> None:
 
     url = f'https://qmsg.zendee.cn/{push_config.get("QMSG_TYPE")}/{push_config.get("QMSG_KEY")}'
     payload = {"msg": f'{title}\n\n{content.replace("----", "-")}'.encode("utf-8")}
-    response = req.post(url=url, params=payload).json()
+    response = _get_req().post(url=url, params=payload).json()
 
     if response["code"] == 0:
         logger.debug("qmsg 推送成功！")
@@ -535,7 +537,7 @@ class WeCom:
             "corpid": self.CORPID,
             "corpsecret": self.CORPSECRET,
         }
-        resp = req.post(url, params=values)
+        resp = _get_req().post(url, params=values)
         data = resp.json()
         return data["access_token"]
 
@@ -551,7 +553,7 @@ class WeCom:
             "safe": "0",
         }
         send_msges = bytes(json.dumps(send_values), "utf-8")
-        respone = req.post(send_url, send_msges)
+        respone = _get_req().post(send_url, send_msges)
         respone = respone.json()
         return respone["errmsg"]
 
@@ -577,7 +579,7 @@ class WeCom:
             },
         }
         send_msges = bytes(json.dumps(send_values), "utf-8")
-        respone = req.post(send_url, send_msges)
+        respone = _get_req().post(send_url, send_msges)
         respone = respone.json()
         return respone["errmsg"]
 
@@ -598,7 +600,7 @@ def wecom_bot(title: str, content: str) -> None:
     url = f"{origin}/cgi-bin/webhook/send?key={push_config.get('QYWX_KEY')}"
     headers = {"Content-Type": "application/json;charset=utf-8"}
     data = {"msgtype": "text", "text": {"content": f"{title}\n\n{content}"}}
-    response = req.post(
+    response = _get_req().post(
         url=url, data=json.dumps(data), headers=headers, timeout=15
     ).json()
 
@@ -643,7 +645,7 @@ def telegram_bot(title: str, content: str) -> None:
             push_config.get("TG_PROXY_HOST"), push_config.get("TG_PROXY_PORT")
         )
         proxies = {"http": proxyStr, "https": proxyStr}
-    response = req.post(
+    response = _get_req().post(
         url=url, headers=headers, params=payload, proxies=proxies
     ).json()
 
@@ -682,7 +684,7 @@ def aibotk(title: str, content: str) -> None:
         }
     body = json.dumps(data).encode(encoding="utf-8")
     headers = {"Content-Type": "application/json"}
-    response = req.post(url=url, data=body, headers=headers).json()
+    response = _get_req().post(url=url, data=body, headers=headers).json()
     logger.debug(response)
     if response["code"] == 0:
         logger.debug("智能微秘书 推送成功！")
@@ -758,7 +760,7 @@ def pushme(title: str, content: str) -> None:
         "title": title,
         "content": content,
     }
-    response = req.post(url, data=data)
+    response = _get_req().post(url, data=data)
 
     if response.status_code == 200 and response.text == "success":
         logger.debug("PushMe 推送成功！")
@@ -777,7 +779,7 @@ def pipehub(title: str, content: str) -> None:
     logger.debug("pipehub 服务启动")
     if title:
         content = f"{title}\n\n{content}"
-    response = req.post(f'https://api.pipehub.net/send/{push_config.get("PIPEHUB_KEY")}', data=content.encode('utf-8'))
+    response = _get_req().post(f'https://api.pipehub.net/send/{push_config.get("PIPEHUB_KEY")}', data=content.encode('utf-8'))
     if response.status_code == 200:
         logger.debug("pipehub 推送成功！")
     else:
@@ -793,7 +795,7 @@ def xtuis(title: str, content: str) -> None:
         logger.error("xtuis 服务的 XTUIS_KEY 未设置!!")
         raise ValueError("xtuis 服务的 XTUIS_KEY 未设置!!")
     logger.debug("xtuis 服务启动")
-    response = req.post(f'https://wx.xtuis.cn/{push_config.get("XTUIS_KEY")}.send', data={
+    response = _get_req().post(f'https://wx.xtuis.cn/{push_config.get("XTUIS_KEY")}.send', data={
         "text": title,
         "desp": content,
     })
@@ -812,7 +814,7 @@ def aiops_phone(title: str, content: str) -> None:
         raise ValueError("aiops 服务的 AIOPS_KEY 未设置!!")
     logger.debug("aiops 服务启动")
     import uuid
-    response = req.post("http://api.aiops.com/alert/api/event", json={
+    response = _get_req().post("http://api.aiops.com/alert/api/event", json={
         "app": push_config.get("AIOPS_KEY"),
         "eventId": uuid.uuid4().hex,
         "eventType": "trigger",
@@ -832,7 +834,7 @@ def showdoc(title: str, content: str) -> None:
         logger.error("showdoc 服务的 SHOWDOC_KEY 未设置!!")
         raise ValueError("showdoc 服务的 SHOWDOC_KEY 未设置!!")
     logger.debug("showdoc 服务启动")
-    response = req.post("https://push.showdoc.com.cn/server/api/push/" + push_config.get("SHOWDOC_KEY"), json={
+    response = _get_req().post("https://push.showdoc.com.cn/server/api/push/" + push_config.get("SHOWDOC_KEY"), json={
         "title": title,
         "content": content,
     })
@@ -850,7 +852,7 @@ def notifyx(title: str, content: str, description=None) -> None:
         logger.error("notifyx 服务的 NOTIFYX_KEY 未设置!!")
         raise ValueError("notifyx 服务的 NOTIFYX_KEY 未设置!!")
     logger.debug("notifyx 服务启动")
-    response = req.post("https://www.notifyx.cn/api/v1/send/" + push_config.get("NOTIFYX_KEY"), json={
+    response = _get_req().post("https://www.notifyx.cn/api/v1/send/" + push_config.get("NOTIFYX_KEY"), json={
         "title": title,
         "content": content,
         "description": description,
@@ -896,7 +898,7 @@ def chronocat(title: str, content: str) -> None:
                     }
                 ],
             }
-            response = req.post(url, headers=headers, data=json.dumps(data))
+            response = _get_req().post(url, headers=headers, data=json.dumps(data))
             if response.status_code == 200:
                 if chat_type == 1:
                     logger.debug(f"QQ个人消息:{ids}推送成功！")
@@ -949,7 +951,7 @@ def parse_body(body, content_type):
         try:
             json_value = json.loads(val)
             parsed[key] = json_value
-        except:
+        except Exception:
             parsed[key] = val
 
     if content_type == "application/x-www-form-urlencoded":
@@ -1000,7 +1002,7 @@ def custom_notify(title: str, content: str) -> None:
 
     headers = parse_headers(WEBHOOK_HEADERS)
     body = parse_body(formatBody, WEBHOOK_CONTENT_TYPE)
-    response = req.request(
+    response = _get_req().request(
         method=WEBHOOK_METHOD, url=formatUrl, headers=headers, timeout=15, data=body
     )
 
@@ -1016,7 +1018,7 @@ def one() -> str:
     :return:
     """
     url = "https://v1.hitokoto.cn/"
-    res = req.get(url).json()
+    res = _get_req().get(url).json()
     return res["hitokoto"] + "    ----" + res["from"]
 
 

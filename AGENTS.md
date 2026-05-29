@@ -6,125 +6,149 @@
 
 ### 1. 主要入口与导入方式
 
-- **推荐入口**：`from wtfutil import util`
-  - 一次性导入 HTTP、文件、字符串、数据库、进程、通知、翻译、单例、通用工具等常用函数。
-- **按模块精细导入**：
-  - `from wtfutil import httputil`：HTTP 相关
-  - `from wtfutil import fileutil`：文件相关
-  - `from wtfutil import strutil`：字符串与加解密
-  - `from wtfutil import sqlutil`：数据库
-  - `from wtfutil import procutil`：进程管理（Windows）
-  - `from wtfutil import notifyutil`：通知
-  - `from wtfutil import translateutil`：翻译
-  - `from wtfutil import imgutil`：随机图片/头像拉取
-  - `from wtfutil import singleinstance`：单实例运行
+**推荐做法**：所有公开符号均可从包顶层直接导入，IDE 可自动补全：
 
-在需要示例代码时，优先引用外部文档目录中的 **`D:\Code\Python\wtfutil-readme\README.md`（英文）** 与 **`README_zh.md`（中文）**，而不是在回答中重复实现逻辑。
+```python
+from wtfutil import requests_session, read_text, send, get_resource
+```
+
+**按子模块精细导入**（用于只需特定功能、或需要访问子模块内部类时）：
+
+```python
+from wtfutil import httputil   # HTTP 相关
+from wtfutil import fileutil   # 文件相关
+from wtfutil import strutil    # 字符串与加解密
+from wtfutil import sqlutil    # 数据库
+from wtfutil import procutil   # 进程管理（Windows）
+from wtfutil import notifyutil # 通知
+from wtfutil import translateutil # 翻译
+from wtfutil import imgutil    # 随机图片/头像拉取
+from wtfutil import singleinstance # 单实例运行
+from wtfutil import util       # 杂项工具（UniqueQueue、measure_time、get_resource 等）
+```
+
+在需要示例代码时，优先引用本仓库根目录的 **`README.md`（英文）** 与 **`README_zh.md`（中文）**。
 
 ---
 
 ### 2. 主要模块及用途
 
+- `wtfutil/_base.py`
+  - 私有底层模块（**不含任何 wtfutil 内部依赖**），供各子模块安全导入。
+  - 包含：`get_resource(filename)`、`get_resource_dir(basedir=None)`。
+  - 这两个函数同时通过 `wtfutil.util` 与 `wtfutil.__init__` 重新导出。
+
 - `wtfutil/util.py`
-  - 聚合并重导出各子模块的常用函数，是推荐的统一入口。
-  - 包含：requests 优化（代理、重试、超时、SSL 处理）、文件读写、字符串处理与加解密、数据库封装、通知工具、翻译、随机头像、单实例、时间测量、唯一队列等。
+  - **杂项工具**（不再聚合子模块）：
+    - `UniqueQueue`：去重队列（相同 dict 内容重复 put 会被忽略）。
+    - `measure_time`：计时装饰器。
+    - `unique_items`、`cut_list`、`group_data`：列表/分组工具。
+    - `current_datetime`、`format_datetime`、`parse_datetime`：日期时间。
+    - `get_resource` / `get_resource_dir`：re-export 自 `_base`。
 
 - `wtfutil/httputil.py`
   - HTTP 工具封装：
-    - `requests_session`：带代理、重试、超时等增强能力的会话。
+    - `requests_session`：带代理、重试、超时、SSL 处理、分块传输、速率限制等增强能力的会话工厂。
     - `httpraw`：发送原始 HTTP 报文。
-  - 示例见 `wtfutil-readme/README.md` 中 HTTP / httputil 章节。
+    - URL/IP/域名工具：`is_private_ip`、`get_maindomain`、`url2ip`、`is_wildcard_dns_batch` 等。
+    - TLS 适配器：`CustomSslContextHttpAdapter`、`DESAdapter`。
 
 - `wtfutil/fileutil.py`
   - 文件工具：
-    - 文本/二进制读写：`read_text` / `read_bytes` / `read_lines` / `write_text` / `write_lines` / `write_json` 等。
+    - 文本/二进制读写：`read_text` / `read_lines` / `write_text` / `write_lines` / `write_json` 等。
     - 文件哈希：`file_md5` / `file_sha1` / `file_sha256`。
     - JAR 分析：`JarAnalyzer`。
 
 - `wtfutil/strutil.py`
   - 字符串和加解密：
-    - Base64、URL 编码/解码。
+    - Base64、URL 编码/解码、QP 编码、uuencode。
     - 字符串哈希（MD5 / SHA1 / SHA256）。
     - RSA / DES 加解密。
-    - 其他工具（前后缀处理、随机字符串、大小写随机等）。
+    - 其他工具（前后缀处理、随机字符串、大小写随机、UTF-7、ghost bits 等）。
 
 - `wtfutil/sqlutil.py`
   - 数据库封装：
-    - `SQLite`、`MYSQL` 工具类。
+    - `SQLite`、`MYSQL` 工具类（继承 `Database` 抽象基类）。
     - 支持常见 CRUD、批量插入、条件查询等操作。
-    - 管理线程安全连接。
+    - `ScriptRunner`：多语句 SQL 脚本执行器。
 
 - `wtfutil/procutil.py`
   - 进程管理（**仅 Windows 有效**）：
-    - 按名称或 PID 查找进程。
-    - 挂起 / 恢复指定进程。
-  - 示例见 `wtfutil-readme` 文档中 procutil 章节。
+    - 按名称或 PID 查找进程；按脚本路径或命令行模式查找 Python 进程。
+    - 挂起 / 恢复 / 杀死指定进程。
 
 - `wtfutil/notifyutil.py`
   - 多通道通知：
-    - 聚合方法：`send(title, content)`，将同一条消息并发发送到所有已正确配置的通道。
+    - 聚合方法：`send(title, content)`，将同一条消息并发发送到所有已配置通道。
     - 常用通道：Bark、钉钉、飞书、Telegram、SMTP、ShowDoc、自定义 Webhook 等。
-    - 典型用法与配置见 `wtfutil-readme/README_zh.md` 中 notifyutil 与配置章节。
+    - `push_config`：配置字典，加载顺序：内置默认值 ← ini 文件 ← 环境变量。
+    - **不在模块级添加任何 logging Handler**（符合库规范，由调用方配置）。
 
 - `wtfutil/translateutil.py`
-  - 百度翻译封装：
-  - 如 `BaiduTranslateApi.translate("你好", "zh", "en")`。
-  - 示例见 `wtfutil-readme` 文档中 translateutil 章节。
+  - 百度翻译封装：`BaiduTranslateApi(appid, appkey).translate(query, from_lang, to_lang)`。
 
 - `wtfutil/imgutil.py`
   - 随机头像拉取（多源回退）：
-  - `random_avatar_bytes()`：返回图片原始 `bytes`；内置 loliapi、dmoe、xjh、btstu、horosama 等直链/302 源，配置了 apihz 凭证时另含 JSON 源。
-  - apihz 配置：`wtfconfig.ini` 的 `[img]` 段或环境变量 `APIHZ_IMG_ID` / `APIHZ_IMG_KEY`（环境变量优先）。
+    - `random_avatar_bytes()`：返回图片原始 `bytes`；内置 loliapi、dmoe、xjh、btstu、horosama 等直链/302 源，配置了 apihz 凭证时另含 JSON 源。
+    - `_load_img_config()` 延迟加载（首次调用时才读取配置文件）。
+    - apihz 配置：`wtfconfig.ini` 的 `[img]` 段或环境变量 `APIHZ_IMG_ID` / `APIHZ_IMG_KEY`（环境变量优先）。
 
 - `wtfutil/singleinstance.py`
   - 单实例运行控制：
-    - 上下文管理器形式：`with single_instance(...): ...`
+    - 上下文管理器形式：`with single_instance(flavor_id="job"): ...`
     - 装饰器形式：`@single_instance(flavor_id="job")`
-  - 用于防止脚本在同一时间被多开，示例见 `wtfutil-readme` 文档中 singleinstance 章节。
 
 ---
 
-### 3. 配置与环境（通知相关）
+### 3. 依赖层级（循环引用规则）
+
+```
+_base.py（纯 stdlib，零 wtfutil 依赖）
+      ↑
+fileutil / httputil / strutil / sqlutil / procutil / singleinstance
+      ↑
+notifyutil（from ._base + from .httputil；_req 延迟初始化）
+imgutil（from ._base + from .httputil；config 延迟加载）
+translateutil（from . import util，仅方法内使用）
+      ↑
+util.py（杂项工具；re-export get_resource from _base）
+      ↑
+__init__.py（显式导出所有公开符号，不使用 wildcard import）
+```
+
+**规则**：子模块若需要 `get_resource`，直接 `from ._base import get_resource`，**不得** `from . import util` 后在模块级调用 util 的函数（会造成循环引用）。
+
+---
+
+### 4. 配置与环境
 
 - 通知配置均通过 `wtfutil.notifyutil.push_config` 管理，加载顺序：
   1. 内置默认值。
   2. `wtfconfig.ini` 中的 `[notify]` 段。
   3. 环境变量（**优先级最高**）。
-- `wtfconfig.ini` 的查找路径由 `util.get_resource("wtfconfig.ini")` 决定：
-  - 当前工作目录。
-  - `resource/wtfconfig.ini`。
-  - 用户家目录 `~/wtfconfig.ini`。
-- 详细 key 与示例配置：
-  - 参见 `wtfutil-readme/README.md` 或 `README_zh.md` 的配置章节。
+- `wtfconfig.ini` 的查找路径：当前工作目录 → `resource/wtfconfig.ini` → `~/wtfconfig.ini`。
+- img 配置通过 `wtfutil.imgutil.img_config`，查找路径相同（`[img]` 段）。
 
 ---
-
-### 4. 示例与文档定位
-
-- 当需要给出具体使用示例时，优先参考：
-  - `D:\Code\Python\wtfutil-readme\README.md`（英文：使用示例 + API 参考）。
-  - `D:\Code\Python\wtfutil-readme\README_zh.md`（中文：同上，含 httputil 等详细说明）。
-- 如需更细分的说明，可结合各子模块源码的 `__all__` 与实现。
 
 ### 5. 新增 API 时的文档同步（必须）
 
-**每次新增或变更对外公开 API（新模块、新函数、新配置项等）时，Agent 必须同步更新外部 README：**
+**每次新增或变更对外公开 API（新模块、新函数、新配置项等）时，Agent 必须同步：**
 
-- 目标文件：`D:\Code\Python\wtfutil-readme\README.md`
-- **仅当该路径下文件存在时**才修改；不存在则跳过，勿新建该仓库外的目录结构。
-- 在 README 中补充与现有章节风格一致的**详细用法**：功能说明、代码示例、配置项（如有）、注意事项。
-- 同步更新本文件 `AGENTS.md` 中对应模块的简要说明（第 2 节）。
-- 同步更新本仓库根目录 `README.md`（简短英文索引，指向 `wtfutil-readme`）。
-
-**不要**再维护 `API_REFERENCE.md`（已合并进 `wtfutil-readme` 文档）。
+1. 更新对应子模块的 `__all__`。
+2. 更新 `wtfutil/__init__.py` 的显式导入列表与 `__all__`。
+3. 更新本仓库根目录 `README.md`（英文，全量文档）。
+4. 更新本仓库根目录 `README_zh.md`（中文，全量文档）。
+5. 更新本文件 `AGENTS.md` 第 2 节中对应模块的简要说明。
+6. 若 `D:\Code\Python\wtfutil-readme\README.md` 存在，同步更新（**仅当文件已存在时**）。
 
 ---
 
-### 6. 外部 README 路径速查
+### 6. 文档路径速查
 
 | 文件 | 用途 |
 |------|------|
-| `D:\Code\Python\wtfutil-readme\README.md` | 面向用户的详细用法与示例（新增 API 时同步更新） |
-| 本仓库 `README.md` | 简短英文索引（安装、快速开始、文档链接） |
+| 本仓库 `README.md` | 面向用户的完整英文 API 文档与示例 |
+| 本仓库 `README_zh.md` | 面向用户的完整中文 API 文档与示例 |
 | 本仓库 `AGENTS.md` | Agent 项目结构与规则（本文件） |
-
+| `D:\Code\Python\wtfutil-readme\README.md` | 外部文档（仅当路径存在时同步更新） |

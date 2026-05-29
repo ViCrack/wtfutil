@@ -11,6 +11,7 @@ from typing import Callable, Iterable, List, Tuple
 from configobj import ConfigObj
 from requests import Response
 
+from ._base import get_resource
 from .httputil import RequestsSession, requests_session
 
 logger = logging.getLogger(__name__)
@@ -42,9 +43,8 @@ def _load_img_config() -> None:
     global _config_loaded
     if _config_loaded:
         return
-    from . import util
 
-    config_path = util.get_resource("wtfconfig.ini")
+    config_path = get_resource("wtfconfig.ini")
     if config_path and Path(config_path).exists():
         cfg = ConfigObj(config_path, encoding="UTF-8")
         if "img" in cfg:
