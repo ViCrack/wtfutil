@@ -6,35 +6,71 @@
 from wtfutil import SQLite, MYSQL, next_id
 ```
 
+## Examples
+
+### SQLite: schema and CRUD
+
+```python
+from wtfutil import SQLite, next_id
+
+db = SQLite("data.db")
+db.execute("""
+    CREATE TABLE IF NOT EXISTS items (
+        id TEXT PRIMARY KEY,
+        url TEXT,
+        status INTEGER DEFAULT 0
+    )
+""")
+
+db.insert("items", {"id": next_id(), "url": "https://a.com", "status": 0})
+db.insert_many("items", [
+    {"id": next_id(), "url": u, "status": 0}
+    for u in ["https://b.com", "https://c.com"]
+])
+
+row = db.select_one("items", where_clause={"url": "https://a.com"})
+rows = db.select("items", where_clause={"status": 0}, order="id DESC", limit=10)
+by_id = db.select_by_id("items", row["id"])
+
+db.update("items", {"status": 1}, where_clause={"url": "https://a.com"})
+db.delete("items", where_clause={"status": 0})
+print(db.record_exists("items", {"url": "https://a.com"}))
+db.close()
+```
+
+### Raw SQL
+
+```python
+db.query("SELECT * FROM items WHERE status > ?", 0)
+db.get("SELECT * FROM items WHERE id = ?", item_id)
+```
+
+### MySQL (same API)
+
+```python
+db = MYSQL(host="127.0.0.1", user="root", password="pass", database="mydb")
+db.insert_or_replace("items", {"id": "x1", "url": "https://d.com", "status": 0})
+```
+
 ## Classes
 
 | Symbol | Description |
 |--------|-------------|
-| `Dict` | `dict` with attribute access (`d.key`) |
-| `Database` | Abstract CRUD / query interface |
-| `SQLite` | `SQLite(db_file: str)` |
-| `MYSQL` | `MYSQL(host, user, password, database, charset='utf8mb4', port=3306, ssl=None)` |
-| `ScriptRunner` | Multi-statement scripts with basic `DELIMITER` support |
+| `Dict` | `dict` with attribute access |
+| `Database` | Abstract CRUD |
+| `SQLite` | `SQLite(db_file)` |
+| `MYSQL` | `MYSQL(host, user, password, database, ...)` |
+| `ScriptRunner` | Multi-statement scripts |
 
-## Database method reference
+## Common methods
 
 | Methods | Purpose |
 |---------|---------|
-| `insert`, `insert_or_replace`, `insert_many`, `bulk_insert` | Insert rows |
-| `update`, `delete` | Conditional update/delete |
-| `select`, `select_one`, `select_by_id`, `fetch_rows`, `fetchone`, `fetch_by_id` | Queries |
-| `count`, `exists`, `record_exists` | Count / existence |
-| `execute`, `query` | Raw SQL |
-| `get`, `replace` | Get or replace by primary key |
+| `insert`, `insert_or_replace`, `insert_many` | Insert |
+| `update`, `delete` | Update / delete |
+| `select`, `select_one`, `select_by_id` | Query |
+| `count`, `record_exists` | Count / exists |
+| `execute`, `query`, `get` | Raw SQL |
 | `close` | Close connection |
 
-See source docstrings on `Database`, `SQLite`, and `MYSQL` for placeholders and return types.
-
-## Helper functions
-
-| Symbol | Description |
-|--------|-------------|
-| `next_id(t=None)` | ~50-char ID (timestamp + UUID) |
-| `join_field_value(data)` | `UPDATE SET` fragment |
-| `join_field(data)` | Column list |
-| `join_value(data)` | Value placeholders |
+See source docstrings for placeholders and return types.

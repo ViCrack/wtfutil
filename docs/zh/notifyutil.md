@@ -23,6 +23,16 @@ from wtfutil import send, push_config
 
 send("标题", "正文")
 push_config["FEISHU_KEY"] = "xxx"
+push_config["CONSOLE"] = "true"
+```
+
+单通道：
+
+```python
+from wtfutil import feishu_bot, telegram_bot
+
+feishu_bot("告警", "磁盘使用率 90%")
+telegram_bot("告警", "任务失败")
 ```
 
 ## send(title, content)

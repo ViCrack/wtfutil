@@ -13,18 +13,21 @@ from wtfutil import read_text, read_lines, write_json, JarAnalyzer
 | `read_text(filepath, mode='r', encoding='utf-8', not_exists_ok=False, errors=None)` | `mode='rb'` 不按文本编码；`not_exists_ok=True` 且不存在返回 `''` | 读整个文件 |
 | `read_json(filepath, encoding='utf-8', not_exists_ok=False)` | 不存在且 `not_exists_ok=True` 返回 `{}` | JSON → dict |
 | `read_lines(filepath, encoding='utf-8', not_exists_ok=False, unique=False)` | 跳过空行；`unique=True` 保序去重 | 行列表 |
-| `write_text` / `write_lines` / `write_json` | 见源码 docstring | 写文件 |
+| `write_text` / `write_lines` / `write_json` | 写文件 | 见下方示例 |
 | `file_md5` / `file_sha1` / `file_sha256` | 路径 `str` 或 `Path` | 整文件 hex 摘要 |
 | `list_files` / `list_directories` | 单层、全路径 | 非递归 |
 | `touch(filepath, mode=0o666, exist_ok=True)` | | 创建或更新时间戳 |
 
 ```python
-from wtfutil import get_resource, read_lines, read_text
+from wtfutil import get_resource, read_lines, read_text, write_json, file_md5
 
 path = get_resource("blacklist.txt")
 lines = read_lines(path, unique=True)
 domains = read_lines("./state/domains.txt", not_exists_ok=True)
 html = read_text("page.html", errors="backslashreplace")
+
+write_json("out.json", {"count": len(lines)})
+print(file_md5("app.zip"))
 ```
 
 ## JarAnalyzer

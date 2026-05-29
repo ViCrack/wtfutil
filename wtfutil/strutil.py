@@ -12,7 +12,7 @@ import re
 import string
 import sys
 import unicodedata
-from functools import lru_cache
+from functools import lru_cache, wraps
 from typing import Any
 from io import BytesIO
 from urllib.parse import unquote, quote
@@ -68,11 +68,11 @@ def tobool(value: Any) -> bool:
 
 
 if sys.version_info >= (3, 9):
-    # If Python version is 3.9 or newer, use the built-in removesuffix method
+    @wraps(str.removesuffix)
     def removesuffix(s: str, suffix: str) -> str:
         return s.removesuffix(suffix)
 
-
+    @wraps(str.removeprefix)
     def removeprefix(s: str, prefix: str) -> str:
         return s.removeprefix(prefix)
 else:
@@ -199,9 +199,16 @@ def unicode_digit_hex_encode(
     return ''.join(encoded)
 
 
-# url_encode和url_decode是python3的quote和unquote的别名
-url_decode = unquote
-url_encode = quote
+@wraps(quote)
+def url_encode(*args, **kwargs):
+    """URL 编码，行为同 ``urllib.parse.quote``。"""
+    return quote(*args, **kwargs)
+
+
+@wraps(unquote)
+def url_decode(*args, **kwargs):
+    """URL 解码，行为同 ``urllib.parse.unquote``。"""
+    return unquote(*args, **kwargs)
 
 
 def qp_encode_all(text_input: bytes | str,
@@ -738,8 +745,6 @@ GHOST_BITS_VISIBLE_RANGES = (
     (0x4E00, 0x9FA5),  # 常见 CJK 统一表意文字，中文字体覆盖更稳定
 )
 
-GHOST_BITS_RANGES = GHOST_BITS_VISIBLE_RANGES
-
 
 def _is_ghost_bits_visible_char(code_point: int) -> bool:
     """
@@ -759,7 +764,7 @@ def _is_ghost_bits_visible_char(code_point: int) -> bool:
 @lru_cache(maxsize=256)
 def _ghost_bits_candidates(byte_value: int) -> tuple[int, ...]:
     candidates = []
-    for start, end in GHOST_BITS_RANGES:
+    for start, end in GHOST_BITS_VISIBLE_RANGES:
         first = start + ((byte_value - start) & 0xFF)
         candidates.extend(
             code_point

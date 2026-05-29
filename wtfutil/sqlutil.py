@@ -4,7 +4,6 @@ import sqlite3
 import threading
 import time
 import uuid
-import warnings
 import weakref
 from abc import ABC, abstractmethod
 from contextlib import closing
@@ -295,33 +294,6 @@ class Database(ABC):
         """
         where_clause = {"id": id_value}
         return self.select_one(table, columns, where_clause)
-
-    # 旧方法重定向，保持向后兼容
-    def fetch_rows(self, table: str, fields=None, condition=None, order=None, limit=None, fetchone=False):
-        warnings.warn("fetch_rows is deprecated, use select instead", DeprecationWarning)
-        if fetchone:
-            return self.select_one(table, columns=fields, where_clause=condition, order=order, limit=limit)
-        return self.select(table, columns=fields, where_clause=condition, order=order, limit=limit)
-
-    def fetchone(self, table: str, fields=None, condition=None, order=None, limit=None):
-        warnings.warn("fetchone is deprecated, use select_one instead", DeprecationWarning)
-        return self.select_one(table, columns=fields, where_clause=condition, order=order, limit=limit)
-
-    def bulk_insert(self, table: str, data_list: List[Dict[str, Any]]):
-        warnings.warn("bulk_insert is deprecated, use insert_many instead", DeprecationWarning)
-        return self.insert_many(table, records=data_list)
-
-    def replace(self, table: str, data: Dict[str, Any]):
-        warnings.warn("replace is deprecated, use insert_or_replace instead", DeprecationWarning)
-        return self.insert_or_replace(table, record=data)
-
-    def exists(self, table: str, condition: Union[Dict[str, Any], str]):
-        warnings.warn("exists is deprecated, use record_exists instead", DeprecationWarning)
-        return self.record_exists(table, where_clause=condition)
-
-    def fetch_by_id(self, table: str, id_value: Union[int, str], fields=None):
-        warnings.warn("fetch_by_id is deprecated, use select_by_id instead", DeprecationWarning)
-        return self.select_by_id(table, id_value, columns=fields)
 
 
 class SQLite(Database):

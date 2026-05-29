@@ -53,8 +53,18 @@ q.put({"url": "https://a.com"})  # dict 内容相同 → 忽略
 **`get_resource` 示例**：配置文件、黑名单等与脚本相对位置无关时，把文件放在 `resource/` 或用户家目录即可被找到（常与 [fileutil.read_lines](fileutil.md) 联用）。
 
 ```python
-from wtfutil import get_resource, read_lines
+from wtfutil import get_resource, read_lines, cut_list, group_data, measure_time
 
 path = get_resource("blacklist.txt")
 lines = read_lines(path, unique=True)
+
+for batch in cut_list(lines, 50):
+    process(batch)
+
+rows = [{"status": 0, "url": "a"}, {"status": 1, "url": "b"}]
+group_data(rows, group_by="status")
+
+@measure_time
+def job():
+    ...
 ```

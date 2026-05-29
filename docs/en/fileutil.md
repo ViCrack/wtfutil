@@ -19,10 +19,12 @@ from wtfutil import read_text, read_lines, write_json, JarAnalyzer
 | `touch(path, mode=0o666, exist_ok=True)` | Create or update mtime |
 
 ```python
-from wtfutil import get_resource, read_lines, read_text
+from wtfutil import get_resource, read_lines, read_text, write_json, file_md5
 
 lines = read_lines(get_resource("urls.txt"), unique=True)
 html = read_text("page.html", errors="backslashreplace")
+write_json("out.json", {"count": len(lines)})
+print(file_md5("app.zip"))
 ```
 
 ## JarAnalyzer

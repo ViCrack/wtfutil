@@ -6,20 +6,45 @@
 from wtfutil import find_process_by_name, suspend_process
 ```
 
-## 符号索引
+## 示例
+
+```python
+from wtfutil import (
+    find_python_processes_by_script,
+    kill_python_processes_by_script,
+    suspend_process,
+    resume_process,
+)
+
+# 按脚本路径查找 / 结束
+procs = find_python_processes_by_script("worker.py")
+kill_python_processes_by_script("worker.py")
+
+# 按命令行子串
+from wtfutil import kill_python_processes_by_cmdline
+kill_python_processes_by_cmdline("celery worker")
+
+# 挂起 / 恢复记事本（示例）
+suspend_process("notepad.exe")
+resume_process("notepad.exe")
+
+# 列出所有 Python 进程详情
+from wtfutil import list_all_python_process_details
+for p in list_all_python_process_details():
+    print(p["pid"], p.get("script"), p.get("cmdline"))
+```
+
+命令行工具见 **[pykill](pykill.md)**：`pykill`、`pykill worker.py -l`。
+
+## API 索引
 
 | 符号 | 说明 |
 |------|------|
 | `find_process_by_name(name)` | 按进程名返回 PID 列表 |
-| `suspend_process(name)` / `suspend_process_by_pid(pid)` | 挂起线程 |
-| `resume_process(name)` / `resume_process_by_pid(pid)` | 恢复线程 |
-| `find_python_process_by_script(script)` | 首个匹配脚本路径的 Python 进程 |
-| `find_python_processes_by_script(script)` | 全部匹配 |
-| `find_python_process_details_by_script(script)` | 详细信息列表 |
-| `kill_python_processes_by_script(script)` | 结束匹配进程 |
-| `find_python_processes_by_cmdline(pattern)` | 按命令行匹配 |
-| `find_python_process_details_by_cmdline(pattern)` | 详细信息 |
-| `kill_python_processes_by_cmdline(pattern)` | 结束匹配 |
-| `list_all_python_process_details()` | 列出所有 Python 进程详情 |
-
-命令行封装见 **[pykill](pykill.md)**（`pip install` 后执行 `pykill`）。
+| `suspend_process` / `suspend_process_by_pid` | 挂起 |
+| `resume_process` / `resume_process_by_pid` | 恢复 |
+| `find_python_process_by_script` / `find_python_processes_by_script` | 按脚本路径 |
+| `find_python_process_details_by_script` | 详细信息 |
+| `kill_python_processes_by_script` | 结束匹配进程 |
+| `find_python_processes_by_cmdline` / `kill_python_processes_by_cmdline` | 按命令行 |
+| `list_all_python_process_details()` | 全部 Python 进程 |

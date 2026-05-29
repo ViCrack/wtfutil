@@ -71,10 +71,15 @@ from wtfutil import str_md5, base64encode, url_encode
 ## 示例
 
 ```python
-from wtfutil import str_md5, base64encode, rsa_encrypt, extract_dict
+from wtfutil import str_md5, url_encode, base64encode, get_middle_text, extract_dict, rand_base
 
 str_md5("hello")
-base64encode(b"data")
+url_encode("a=1&b=你好")
+base64encode("data")
+
+html = '<input name="token" value="abc123">'
+get_middle_text(html, 'name="token" value="', '"')
 
 headers = extract_dict("Host: example.com\nUser-Agent: test\n", "\n")
+token = rand_base(32)
 ```

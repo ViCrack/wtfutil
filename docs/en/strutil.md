@@ -35,3 +35,17 @@ from wtfutil import str_md5, base64encode, url_encode
 ### Misc encoding
 
 `rand_base`, `rand_case`, `format_bytes`, `extract_dict(text, sep, sep2='=')`, `utf8_overlong_encoding`, `utf7_encode`, `unicode_digit_hex_escape`, `unicode_digit_hex_encode`, `ghost_bits_byte`, `ghost_bits_encode`, `ghost_bits_decode_to_bytes`, `ghost_bits_decode`
+
+## Examples
+
+```python
+from wtfutil import str_md5, url_encode, base64encode, get_middle_text, rand_base
+
+str_md5("hello")
+url_encode("a=1&b=2")
+base64encode("data")
+
+html = '<input name="token" value="abc123">'
+get_middle_text(html, 'name="token" value="', '"')
+token = rand_base(32)
+```

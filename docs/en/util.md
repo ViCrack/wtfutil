@@ -26,15 +26,19 @@ from wtfutil import UniqueQueue, measure_time, get_resource
 ## Examples
 
 ```python
-from wtfutil import UniqueQueue, measure_time, get_resource, read_lines
+from wtfutil import UniqueQueue, measure_time, get_resource, read_lines, cut_list, group_data
 
 q = UniqueQueue()
 q.put({"url": "https://a.com"})
 q.put({"url": "https://a.com"})  # ignored
 
+lines = read_lines(get_resource("blacklist.txt"), unique=True)
+for batch in cut_list(lines, 50):
+    process(batch)
+
+group_data([{"status": 0}, {"status": 1}], group_by="status")
+
 @measure_time
 def heavy():
     ...
-
-lines = read_lines(get_resource("blacklist.txt"), unique=True)
 ```
