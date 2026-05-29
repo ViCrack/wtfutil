@@ -103,7 +103,7 @@ from wtfutil import util       # 杂项工具（UniqueQueue、measure_time、get
     - 文档：`docs/en/singleinstance.md`、`docs/zh/singleinstance.md`
 
 - `wtfutil/pykill.py`
-  - **CLI 工具**（`setup.py` → `console_scripts`：`pykill=wtfutil.pykill:main`），**不在** `__init__.py` / `__all__`。
+  - **CLI 工具**（`pyproject.toml` → `console_scripts`：`pykill=wtfutil.pykill:main`），**不在** `__init__.py` / `__all__`。
   - 列出/终止 Python 进程，封装 `procutil` + Rich + questionary。
   - 文档：`docs/en/pykill.md`、`docs/zh/pykill.md`；README 有「命令行与单实例」摘要。
 
@@ -161,3 +161,59 @@ __init__.py（显式导出所有公开符号，不使用 wildcard import）
 | `docs/README.md` | 文档模块索引（中英链接） |
 | `README.md` / `README_zh.md` | 快速入门 + 模块索引 + 配置摘要 |
 | `AGENTS.md` | Agent 项目结构与规则（本文件） |
+
+---
+
+### 7. Git 提交说明（Agent 撰写 commit message）
+
+**仅在用户明确要求提交时**才执行 `git commit`；message **一律使用简体中文**。
+
+#### 格式
+
+```
+<type>: <简短主题（50 字以内，不用句号结尾）>
+
+<可选正文：1～3 行，说明动机或影响范围，仍用中文>
+```
+
+- **一行提交**：改动简单时只写首行即可。
+- **多行提交**：涉及多模块、破坏性变更或需交代迁移方式时再加正文。
+
+#### type 前缀（小写英文，与仓库历史一致）
+
+| type | 适用场景 |
+|------|----------|
+| `feat` | 新功能、新公开 API |
+| `fix` | 缺陷修复 |
+| `docs` | 仅文档 / README / `docs/` |
+| `build` | 打包、`pyproject.toml`、`publish.py`、依赖与发布流程 |
+| `chore` | 版本号、配置、杂项维护（无功能行为变化） |
+| `refactor` | 重构，不改变对外行为 |
+| `test` | 测试相关 |
+| `perf` | 性能优化 |
+
+#### 撰写要求
+
+1. **主题写「做了什么 + 为了什么」**，避免只罗列文件名（反例：`更新 strutil.py`）。
+2. **与 `git diff` 一致**：未改动的模块不要写进 message。
+3. **破坏性变更**在正文注明「不兼容」及替代 API（如删除 `fetch_rows` → 改用 `select`）。
+4. **不要**在 message 中写敏感信息（密钥、token、完整 `wtfconfig.ini` 内容）。
+5. 参考近期历史：`git log --oneline -10`，保持风格一致（如 `docs: 补充 sqlutil 示例`、`build: 迁移到 pyproject.toml`）。
+
+#### 示例
+
+```
+docs: 各模块文档补充可运行示例
+
+sqlutil / procutil / fileutil 中英文档增加简短示例，API 表保留作索引。
+```
+
+```
+fix: 修复 notifyutil 在空正文时不推送的问题
+```
+
+```
+build: 发布脚本改为仅构建 wheel 并上传 PyPI
+```
+
+**不要**使用英文主题行（除非用户明确要求）；**不要**使用 emoji 前缀（除非用户明确要求）。
