@@ -8,7 +8,7 @@ version = "1.2.18"
 description = "A Python utility library for everyday scripting and automation."
 readme = "README.md"
 requires-python = ">=3.10"
-license = { text = "GPL-3.0-or-later" }
+license = "GPL-3.0-or-later"
 authors = [
     { name = "vicrack", email = "18179821+ViCrack@users.noreply.github.com" },
 ]
@@ -16,7 +16,6 @@ keywords = ["utility", "http", "automation", "notify", "file", "crypto"]
 classifiers = [
     "Topic :: Utilities",
     "Intended Audience :: Developers",
-    "License :: OSI Approved :: GNU General Public License v3 or later (GPLv3+)",
     "Topic :: Software Development :: Libraries",
     "Development Status :: 5 - Production/Stable",
     "Operating System :: OS Independent",
