@@ -174,7 +174,7 @@ base64decode("aGVsbG8gd29ybGQ=")         # b"hello world"
 # URL 编码
 url_encode("a=1&b=你好")                 # "a%3D1%26b%3D%E4%BD%A0%E5%A5%BD"
 
-# 随机字符串（默认字母+数字）
+# 随机字符串（默认小写字母+数字，即 a-z0-9，可用 letters= 自定义字符集）
 token = rand_base(32)
 
 # 从 HTML / 响应中提取两标记间的文本

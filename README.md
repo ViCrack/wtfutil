@@ -176,7 +176,7 @@ base64decode("aGVsbG8gd29ybGQ=")         # b"hello world"
 # URL encoding
 url_encode("a=1&b=hello world")          # "a%3D1%26b%3Dhello%20world"
 
-# Random token
+# Random token (default charset: lowercase letters + digits, a-z0-9; pass letters= to customize)
 token = rand_base(32)
 
 # Extract text between two markers (useful for HTML scraping)

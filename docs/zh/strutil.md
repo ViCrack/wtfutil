@@ -59,8 +59,8 @@ from wtfutil import str_md5, base64encode, url_encode
 
 | 符号 | 说明 |
 |------|------|
-| `rand_base(length, charset=...)` | 随机字符串 |
-| `rand_case(s)` | 随机大小写 |
+| `rand_base(length, letters=...)` | 随机字符串，默认字符集为小写字母+数字（`a-z0-9`，共 36 个），可用 `letters` 自定义 |
+| `rand_case(s)` | 随机大小写混淆，仅对区分大小写的字母有效，保证结果与输入不同 |
 | `format_bytes(n)` | 人类可读字节大小 |
 | `extract_dict(text, sep, sep2='=')` | 按分隔符解析为 dict（`httpraw` 解析头用） |
 | `utf8_overlong_encoding` | UTF-8 过长编码 |
@@ -81,5 +81,6 @@ html = '<input name="token" value="abc123">'
 get_middle_text(html, 'name="token" value="', '"')
 
 headers = extract_dict("Host: example.com\nUser-Agent: test\n", "\n")
+# 默认字符集为小写字母+数字 (a-z0-9)，可用 letters= 自定义
 token = rand_base(32)
 ```

@@ -534,7 +534,12 @@ def splitlines(string: str) -> list[str]:
 
 
 def rand_base(length: int, letters: str = string.ascii_lowercase + string.digits) -> str:
-    """从可选字符集生成给定长度字符串的随机序列(默认为字母和数字)
+    """从给定字符集生成指定长度的随机字符串。
+
+    默认字符集为 ``string.ascii_lowercase + string.digits``，即 26 个小写英文字母
+    (``a-z``) 加 10 个十进制数字 (``0-9``)，共 36 个字符，不含大写字母与符号。
+    可通过 ``letters`` 传入自定义字符集，例如 ``string.ascii_letters + string.digits``
+    可同时覆盖大小写字母与数字。
     """
     return ''.join(random.choice(letters) for i in range(length))
 
@@ -542,6 +547,10 @@ def rand_base(length: int, letters: str = string.ascii_lowercase + string.digits
 def rand_case(s: str) -> str:
     """
     随机大小写混淆，确保结果与原始字符串不一致。
+
+    对每个字符在 ``upper()`` 与 ``lower()`` 之间随机选择，因此只对区分大小写的
+    字母（如 ``a-z``、``A-Z`` 及部分 Unicode 字母）有效；数字、标点等无大小写
+    概念的字符保持原样。会强制将至少一个字符的大小写翻转，保证结果与输入不同。
 
     Args:
         s: 输入字符串。
