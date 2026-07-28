@@ -275,7 +275,7 @@ def base64decode(value: str, encoding='utf-8', errors='strict') -> str:
     'strict'：默认行为，如果遇到无法解码的字符，抛出 UnicodeDecodeError 异常。
     'backslashreplace'：使用 Unicode 转义序列替代无法解码的字符。例如，b'\xe4\xb8\x96\xe7\x95\x8c'.decode('ascii', errors='backslashreplace') 输出 '\\xe4\\xb8\\x96\\xe7\\x95\\x8c'。
     'xmlcharrefreplace'：使用 XML 实体替代无法解码的字符。例如，b'\xe4\xb8\x96\xe7\x95\x8c'.decode('ascii', errors='xmlcharrefreplace') 输出 '&#19990;&#30028;'。
-    'surrogateescape'：将无法解码的字节转换为 Unicode 符号 '�' 的转义码。例如，当解码 Latin-1 字符串时，b'\xe9'.decode('latin-1', errors='surrogateescape') 输出 '\udce9'。
+    'surrogateescape'：将无法解码的字节转换为 Unicode 代理区转义码。例如，b'\\xe9'.decode('utf-8', errors='surrogateescape') 输出 '\\udce9'。
 
     """
     return str(base64.b64decode(value), encoding=encoding, errors=errors)
