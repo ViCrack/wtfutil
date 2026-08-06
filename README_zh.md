@@ -348,7 +348,7 @@ groups = group_data(rows, group_by="status")  # {"0": [...], "1": [...]}
 
 ## 配置文件
 
-`get_resource("wtfconfig.ini")` 按以下顺序查找，**环境变量优先级最高**：
+由 `wtfutil.configutil` 统一加载（`ensure_section` 按 mtime 热更新）。查找顺序，**环境变量优先级最高**：
 
 > 当前工作目录 → `resource/wtfconfig.ini` → `~/wtfconfig.ini`
 
@@ -375,7 +375,7 @@ APIHZ_IMG_KEY =
 # BASE_URL = https://party.mem.mk
 ```
 
-完整键列表见 `wtfconfig.ini.example`；API 详见 [notifyutil](docs/zh/notifyutil.md)、[imgutil](docs/zh/imgutil.md)、[memshellutil](docs/zh/memshellutil.md)。
+完整键列表见 `wtfconfig.ini.example`；API 详见 [configutil](docs/zh/configutil.md)、[notifyutil](docs/zh/notifyutil.md)、[imgutil](docs/zh/imgutil.md)、[memshellutil](docs/zh/memshellutil.md)。
 
 ---
 
@@ -388,6 +388,7 @@ APIHZ_IMG_KEY =
 | `wtfutil.strutil` | 编码/解码、哈希、RSA/DES、字符串工具 | [中文](docs/zh/strutil.md) · [EN](docs/en/strutil.md) |
 | `wtfutil.sqlutil` | SQLite / MySQL 封装、`Database`、SQL 辅助 | [中文](docs/zh/sqlutil.md) · [EN](docs/en/sqlutil.md) |
 | `wtfutil.procutil` | Windows 进程管理（仅 Windows） | [中文](docs/zh/procutil.md) · [EN](docs/en/procutil.md) |
+| `wtfutil.configutil` | 统一 `wtfconfig.ini` 加载与 mtime 热更新 | [中文](docs/zh/configutil.md) · [EN](docs/en/configutil.md) |
 | `wtfutil.notifyutil` | 多通道通知推送 | [中文](docs/zh/notifyutil.md) · [EN](docs/en/notifyutil.md) |
 | `wtfutil.translateutil` | 百度翻译 API | [中文](docs/zh/translateutil.md) · [EN](docs/en/translateutil.md) |
 | `wtfutil.memshellutil` | MemShellParty 内存马生成 SDK | [中文](docs/zh/memshellutil.md) · [EN](docs/en/memshellutil.md) |

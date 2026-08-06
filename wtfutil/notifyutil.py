@@ -14,11 +14,9 @@ import urllib.parse
 from email.header import Header
 from email.mime.text import MIMEText
 from email.utils import formataddr
-from pathlib import Path
 
-from configobj import ConfigObj
 import logging
-from ._base import get_resource
+from .configutil import ensure_section
 from .httputil import requests_session, RequestsSession
 
 logger = logging.getLogger(__name__)
@@ -34,7 +32,7 @@ def _get_req() -> RequestsSession:
 
 # 通知服务
 # from qinglong
-push_config = {
+_PUSH_DEFAULTS = {
     'HITOKOTO': False,  # 启用一言（随机句子）
 
     'BARK_PUSH': '',  # bark IP 或设备码，例：https://api.day.app/DxHcxxxxxRxxxxxxcm/
@@ -122,24 +120,8 @@ push_config = {
     'SHOWDOC_KEY': '',  # SHOWDOC https://push.showdoc.com.cn/#/push
     'NOTIFYX_KEY': '',  # https://notifyx.cn/console/dashboard
 }
+push_config = dict(_PUSH_DEFAULTS)
 notify_function = []
-
-# 读取配置文件
-config_path = get_resource('wtfconfig.ini')
-
-if config_path and Path(config_path).exists():
-    cfg = ConfigObj(config_path, encoding='UTF-8')
-
-    if 'notify' in cfg:
-        section = cfg['notify']
-        for key, value in section.items():
-            push_config[key] = value
-
-# 读取 面板变量 或者 github action 运行变量
-for k in push_config:
-    if os.getenv(k):
-        v = os.getenv(k)
-        push_config[k] = v
 
 
 def bark(title: str, content: str) -> None:
@@ -1022,76 +1004,98 @@ def one() -> str:
     return res["hitokoto"] + "    ----" + res["from"]
 
 
-if push_config.get("BARK_PUSH"):
-    notify_function.append(bark)
-if push_config.get("CONSOLE"):
-    notify_function.append(console)
-if push_config.get("DD_BOT_TOKEN") and push_config.get("DD_BOT_SECRET"):
-    notify_function.append(dingding_bot)
-if push_config.get("FEISHU_KEY"):
-    notify_function.append(feishu_bot)
-if push_config.get("GOBOT_URL") and push_config.get("GOBOT_QQ"):
-    notify_function.append(go_cqhttp)
-if push_config.get("GOTIFY_URL") and push_config.get("GOTIFY_TOKEN"):
-    notify_function.append(gotify)
-if push_config.get("IGOT_PUSH_KEY"):
-    notify_function.append(iGot)
-if push_config.get("PUSH_KEY"):
-    notify_function.append(serverJ)
-if push_config.get("DEER_KEY"):
-    notify_function.append(pushdeer)
-if push_config.get("CHAT_URL") and push_config.get("CHAT_TOKEN"):
-    notify_function.append(chat)
-if push_config.get("PUSH_PLUS_TOKEN"):
-    notify_function.append(pushplus_bot)
-if push_config.get("QMSG_KEY") and push_config.get("QMSG_TYPE"):
-    notify_function.append(qmsg_bot)
-if push_config.get("QYWX_AM"):
-    notify_function.append(wecom_app)
-if push_config.get("QYWX_KEY"):
-    notify_function.append(wecom_bot)
-if push_config.get("TG_BOT_TOKEN") and push_config.get("TG_USER_ID"):
-    notify_function.append(telegram_bot)
-if (
-        push_config.get("AIBOTK_KEY")
-        and push_config.get("AIBOTK_TYPE")
-        and push_config.get("AIBOTK_NAME")
-):
-    notify_function.append(aibotk)
-if (
-        push_config.get("SMTP_SERVER")
-        and push_config.get("SMTP_SSL")
-        and push_config.get("SMTP_EMAIL")
-        and push_config.get("SMTP_PASSWORD")
-        and push_config.get("SMTP_NAME")
-):
-    notify_function.append(smtp)
-if push_config.get("PUSHME_KEY"):
-    notify_function.append(pushme)
-if (
-        push_config.get("CHRONOCAT_URL")
-        and push_config.get("CHRONOCAT_QQ")
-        and push_config.get("CHRONOCAT_TOKEN")
-):
-    notify_function.append(chronocat)
-if push_config.get("WEBHOOK_URL") and push_config.get("WEBHOOK_METHOD"):
-    notify_function.append(custom_notify)
-if push_config.get("PIPEHUB_KEY"):
-    notify_function.append(pipehub)
-if push_config.get("XTUIS_KEY"):
-    notify_function.append(xtuis)
-if push_config.get("AIOPS_KEY"):
-    notify_function.append(aiops_phone)
-if push_config.get("SHOWDOC_KEY"):
-    notify_function.append(showdoc)
-if push_config.get("NOTIFYX_KEY"):
-    notify_function.append(notifyx)
+def _rebuild_notify_functions() -> None:
+    """根据当前 push_config 重建启用中的通知通道列表。"""
+    notify_function.clear()
+    if push_config.get("BARK_PUSH"):
+        notify_function.append(bark)
+    if push_config.get("CONSOLE"):
+        notify_function.append(console)
+    if push_config.get("DD_BOT_TOKEN") and push_config.get("DD_BOT_SECRET"):
+        notify_function.append(dingding_bot)
+    if push_config.get("FEISHU_KEY"):
+        notify_function.append(feishu_bot)
+    if push_config.get("GOBOT_URL") and push_config.get("GOBOT_QQ"):
+        notify_function.append(go_cqhttp)
+    if push_config.get("GOTIFY_URL") and push_config.get("GOTIFY_TOKEN"):
+        notify_function.append(gotify)
+    if push_config.get("IGOT_PUSH_KEY"):
+        notify_function.append(iGot)
+    if push_config.get("PUSH_KEY"):
+        notify_function.append(serverJ)
+    if push_config.get("DEER_KEY"):
+        notify_function.append(pushdeer)
+    if push_config.get("CHAT_URL") and push_config.get("CHAT_TOKEN"):
+        notify_function.append(chat)
+    if push_config.get("PUSH_PLUS_TOKEN"):
+        notify_function.append(pushplus_bot)
+    if push_config.get("QMSG_KEY") and push_config.get("QMSG_TYPE"):
+        notify_function.append(qmsg_bot)
+    if push_config.get("QYWX_AM"):
+        notify_function.append(wecom_app)
+    if push_config.get("QYWX_KEY"):
+        notify_function.append(wecom_bot)
+    if push_config.get("TG_BOT_TOKEN") and push_config.get("TG_USER_ID"):
+        notify_function.append(telegram_bot)
+    if (
+            push_config.get("AIBOTK_KEY")
+            and push_config.get("AIBOTK_TYPE")
+            and push_config.get("AIBOTK_NAME")
+    ):
+        notify_function.append(aibotk)
+    if (
+            push_config.get("SMTP_SERVER")
+            and push_config.get("SMTP_SSL")
+            and push_config.get("SMTP_EMAIL")
+            and push_config.get("SMTP_PASSWORD")
+            and push_config.get("SMTP_NAME")
+    ):
+        notify_function.append(smtp)
+    if push_config.get("PUSHME_KEY"):
+        notify_function.append(pushme)
+    if (
+            push_config.get("CHRONOCAT_URL")
+            and push_config.get("CHRONOCAT_QQ")
+            and push_config.get("CHRONOCAT_TOKEN")
+    ):
+        notify_function.append(chronocat)
+    if push_config.get("WEBHOOK_URL") and push_config.get("WEBHOOK_METHOD"):
+        notify_function.append(custom_notify)
+    if push_config.get("PIPEHUB_KEY"):
+        notify_function.append(pipehub)
+    if push_config.get("XTUIS_KEY"):
+        notify_function.append(xtuis)
+    if push_config.get("AIOPS_KEY"):
+        notify_function.append(aiops_phone)
+    if push_config.get("SHOWDOC_KEY"):
+        notify_function.append(showdoc)
+    if push_config.get("NOTIFYX_KEY"):
+        notify_function.append(notifyx)
+
+
+def _ensure_push_config(*, force_reload: bool = False) -> bool:
+    """加载/热更新 [notify]；若配置刷新则重建通道列表。"""
+    changed = ensure_section(
+        push_config,
+        _PUSH_DEFAULTS,
+        "notify",
+        force_reload=force_reload,
+    )
+    if changed or not notify_function:
+        _rebuild_notify_functions()
+    return changed
+
+
+# 导入时先加载一次，保持「import 后即可读 push_config / 调用 send」的兼容行为
+_ensure_push_config()
 
 
 def send(title: str, content: str) -> None:
     if not content:
         logger.error(f"{title} 推送内容为空！")
         return
+
+    _ensure_push_config()
 
     # 根据标题跳过一些消息推送，环境变量：SKIP_PUSH_TITLE 用回车分隔
     skipTitle = os.getenv("SKIP_PUSH_TITLE")

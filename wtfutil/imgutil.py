@@ -3,15 +3,12 @@
 """
 
 import logging
-import os
 import random
-from pathlib import Path
 from typing import Callable, Iterable, List, Tuple
 
-from configobj import ConfigObj
 from requests import Response
 
-from ._base import get_resource
+from .configutil import ensure_section
 from .httputil import RequestsSession, requests_session
 
 logger = logging.getLogger(__name__)
@@ -29,32 +26,24 @@ _DIRECT_AVATAR_SOURCES: List[Tuple[str, str]] = [
     ("horosama", "https://api.horosama.com/random.php?type=mobile"),
 ]
 
-img_config = {
+_IMG_DEFAULTS = {
     "APIHZ_IMG_ID": "",
     "APIHZ_IMG_KEY": "",
     "APIHZ_IMGTYPE": "5",
     "APIHZ_IMG_TYPE": "1",
 }
 
-_config_loaded = False
+img_config = dict(_IMG_DEFAULTS)
 
 
-def _load_img_config() -> None:
-    global _config_loaded
-    if _config_loaded:
-        return
-
-    config_path = get_resource("wtfconfig.ini")
-    if config_path and Path(config_path).exists():
-        cfg = ConfigObj(config_path, encoding="UTF-8")
-        if "img" in cfg:
-            for key, value in cfg["img"].items():
-                img_config[key.upper()] = str(value)
-
-    for k in list(img_config):
-        if os.getenv(k):
-            img_config[k] = os.getenv(k)
-    _config_loaded = True
+def _load_img_config(*, force_reload: bool = False) -> None:
+    ensure_section(
+        img_config,
+        _IMG_DEFAULTS,
+        "img",
+        uppercase_keys=True,
+        force_reload=force_reload,
+    )
 
 
 class ImageFetchError(Exception):

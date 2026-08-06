@@ -22,7 +22,7 @@ with MemShellParty() as client:
 
 ## 配置
 
-优先级：构造参数 `base_url=` > 环境变量 `MEMSHELL_BASE_URL` > `wtfconfig.ini` `[memshell] BASE_URL` > 默认 `https://party.mem.mk`。
+优先级：构造参数 `base_url=` > 环境变量 `MEMSHELL_BASE_URL` > `wtfconfig.ini` `[memshell] BASE_URL` > 默认 `https://party.mem.mk`（经 [`configutil`](configutil.md)）。
 
 ## MemShellParty
 

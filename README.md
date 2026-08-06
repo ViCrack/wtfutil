@@ -355,7 +355,7 @@ groups = group_data(rows, group_by="status")  # {"0": [...], "1": [...]}
 
 ## Configuration
 
-`get_resource("wtfconfig.ini")` searches in this order — **env vars always win**:
+Loaded via `wtfutil.configutil` (mtime hot-reload on `ensure_section`). Search order — **env vars always win**:
 
 > current working directory → `resource/wtfconfig.ini` → `~/wtfconfig.ini`
 
@@ -382,7 +382,7 @@ APIHZ_IMG_KEY =
 # BASE_URL = https://party.mem.mk
 ```
 
-Full key list: `wtfconfig.ini.example`; API details: [notifyutil](docs/en/notifyutil.md), [imgutil](docs/en/imgutil.md), [memshellutil](docs/en/memshellutil.md).
+Full key list: `wtfconfig.ini.example`; API details: [configutil](docs/en/configutil.md), [notifyutil](docs/en/notifyutil.md), [imgutil](docs/en/imgutil.md), [memshellutil](docs/en/memshellutil.md).
 
 ---
 
@@ -395,6 +395,7 @@ Full key list: `wtfconfig.ini.example`; API details: [notifyutil](docs/en/notify
 | `wtfutil.strutil` | Encoding, hashing, RSA/DES, string tools | [EN](docs/en/strutil.md) · [ZH](docs/zh/strutil.md) |
 | `wtfutil.sqlutil` | SQLite / MySQL wrappers, `Database`, SQL helpers | [EN](docs/en/sqlutil.md) · [ZH](docs/zh/sqlutil.md) |
 | `wtfutil.procutil` | Windows process control (Windows only) | [EN](docs/en/procutil.md) · [ZH](docs/zh/procutil.md) |
+| `wtfutil.configutil` | Unified `wtfconfig.ini` load + mtime hot-reload | [EN](docs/en/configutil.md) · [ZH](docs/zh/configutil.md) |
 | `wtfutil.notifyutil` | Multi-channel push notifications | [EN](docs/en/notifyutil.md) · [ZH](docs/zh/notifyutil.md) |
 | `wtfutil.translateutil` | Baidu Translate API | [EN](docs/en/translateutil.md) · [ZH](docs/zh/translateutil.md) |
 | `wtfutil.memshellutil` | MemShellParty memory-shell SDK | [EN](docs/en/memshellutil.md) · [ZH](docs/zh/memshellutil.md) |

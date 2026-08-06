@@ -10,7 +10,7 @@ from wtfutil import random_avatar_bytes, img_config
 
 | Symbol | Description |
 |--------|-------------|
-| `img_config` | Config dict: defaults ← `[img]` in ini ← env vars |
+| `img_config` | Config dict: defaults ← `[img]` ← env (via `configutil.ensure_section`) |
 | `ImageFetchError` | All sources failed; `.errors` is `(name, exc)` list |
 | `fetch_random_bytes(fetchers, session=None, timeout=30, shuffle=True)` | Custom fetcher fallback |
 | `random_avatar_bytes(session=None, timeout=30)` | Built-in sources, returns `bytes` |

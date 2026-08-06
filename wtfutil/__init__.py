@@ -119,6 +119,15 @@ from .sqlutil import (
     join_value,
 )
 
+# ── 配置（wtfconfig.ini）──────────────────────────────────────────────────────
+from .configutil import (
+    get_wtfconfig_path,
+    load_ini_file,
+    merge_section,
+    ensure_section,
+    reload_wtfconfig,
+)
+
 # ── 进程（Windows）────────────────────────────────────────────────────────────
 from .procutil import (
     find_process_by_name,
@@ -249,6 +258,9 @@ __all__ = [
     # sqlutil
     'Dict', 'Database', 'SQLite', 'MYSQL', 'ScriptRunner',
     'next_id', 'join_field_value', 'join_field', 'join_value',
+    # configutil
+    'get_wtfconfig_path', 'load_ini_file', 'merge_section',
+    'ensure_section', 'reload_wtfconfig',
     # procutil
     'find_process_by_name',
     'suspend_process', 'suspend_process_by_pid',

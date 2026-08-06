@@ -26,6 +26,7 @@ from wtfutil import notifyutil # 通知
 from wtfutil import translateutil # 翻译
 from wtfutil import memshellutil # MemShellParty 内存马生成
 from wtfutil import imgutil    # 随机图片/头像拉取
+from wtfutil import configutil # wtfconfig.ini 统一加载与热更新
 from wtfutil import singleinstance # 单实例运行
 from wtfutil import util       # 杂项工具（UniqueQueue、measure_time、get_resource 等）
 ```
@@ -81,11 +82,16 @@ from wtfutil import util       # 杂项工具（UniqueQueue、measure_time、get
     - 按名称或 PID 查找进程；按脚本路径或命令行模式查找 Python 进程。
     - 挂起 / 恢复 / 杀死指定进程。
 
+- `wtfutil/configutil.py`
+  - 统一 `wtfconfig.ini` 加载：`get_wtfconfig_path` / `merge_section` / `ensure_section` / `reload_wtfconfig`。
+  - 优先级：defaults ← ini 段 ← env；按 path+mtime 缓存，mtime 变化时热合并。
+  - 文档：`docs/en/configutil.md`、`docs/zh/configutil.md`；测试：`tests/test_configutil.py`。
+
 - `wtfutil/notifyutil.py`
   - 多通道通知：
     - 聚合方法：`send(title, content)`，将同一条消息并发发送到所有已配置通道。
     - 常用通道：Bark、钉钉、飞书、Telegram、SMTP、ShowDoc、自定义 Webhook 等。
-    - `push_config`：配置字典，加载顺序：内置默认值 ← ini 文件 ← 环境变量。
+    - `push_config`：经 `configutil.ensure_section`（`[notify]`）；`send` 前刷新，mtime 变则重建通道列表。
     - **不在模块级添加任何 logging Handler**（符合库规范，由调用方配置）。
 
 - `wtfutil/translateutil.py`
@@ -93,7 +99,7 @@ from wtfutil import util       # 杂项工具（UniqueQueue、measure_time、get
 
 - `wtfutil/memshellutil.py`
   - MemShellParty HTTP 客户端：`MemShellParty(base_url=...).generate(...)` 生成内存马；`get_config` / `get_packers_tree` / `get_command_configs`。
-  - 默认 `https://party.mem.mk`；`[memshell] BASE_URL` / env `MEMSHELL_BASE_URL`；默认 `shellTool=Behinder`；**无内置缓存**（调用方自行缓存）。
+  - 默认 `https://party.mem.mk`；`[memshell] BASE_URL` / env `MEMSHELL_BASE_URL`（经 `configutil`）；默认 `shellTool=Behinder`；**无内置缓存**（调用方自行缓存）。
   - 通用凭证：`password` / `key`（或 CLI `--password` / `--key`）按 `shellTool` 映射到 `behinderPass` / `godzillaPass`+`godzillaKey` / `antSwordPass`。
   - 文档：`docs/en/memshellutil.md`、`docs/zh/memshellutil.md`；测试：`tests/test_memshell.py`（含可选 live 联调）。
 
@@ -105,7 +111,7 @@ from wtfutil import util       # 杂项工具（UniqueQueue、measure_time、get
 - `wtfutil/imgutil.py`
   - 随机头像拉取（多源回退）：
     - `random_avatar_bytes()`：返回图片原始 `bytes`；内置 loliapi、dmoe、xjh、btstu、horosama 等直链/302 源，配置了 apihz 凭证时另含 JSON 源。
-    - `_load_img_config()` 延迟加载（首次调用时才读取配置文件）。
+    - `_load_img_config()` 经 `configutil.ensure_section`（`[img]`），使用前刷新。
     - apihz 配置：`wtfconfig.ini` 的 `[img]` 段或环境变量 `APIHZ_IMG_ID` / `APIHZ_IMG_KEY`（环境变量优先）。
 
 - `wtfutil/singleinstance.py`
@@ -126,31 +132,33 @@ from wtfutil import util       # 杂项工具（UniqueQueue、measure_time、get
 ```
 _base.py（纯 stdlib，零 wtfutil 依赖）
       ↑
+configutil.py（configobj + get_resource；统一 wtfconfig 加载）
 fileutil / httputil / strutil / sqlutil / procutil / singleinstance
       ↑
-notifyutil（from ._base + from .httputil；_req 延迟初始化）
-imgutil（from ._base + from .httputil；config 延迟加载）
+notifyutil（from .configutil + from .httputil；_req 延迟初始化）
+imgutil（from .configutil + from .httputil；ensure 热加载）
 translateutil（from . import util，仅方法内使用）
-memshellutil（from ._base + from .httputil；config 延迟加载）
+memshellutil（from .configutil + from .httputil；ensure 热加载）
       ↑
 util.py（杂项工具；re-export get_resource from _base）
       ↑
 __init__.py（显式导出所有公开符号，不使用 wildcard import）
 ```
 
-**规则**：子模块若需要 `get_resource`，直接 `from ._base import get_resource`，**不得** `from . import util` 后在模块级调用 util 的函数（会造成循环引用）。
+**规则**：子模块若需要 `get_resource`，直接 `from ._base import get_resource`，**不得** `from . import util` 后在模块级调用 util 的函数（会造成循环引用）。配置读取统一走 `configutil`，不要各自 `ConfigObj`。
 
 ---
 
 ### 4. 配置与环境
 
-- 通知配置均通过 `wtfutil.notifyutil.push_config` 管理，加载顺序：
+- 统一 API：`wtfutil.configutil`（`merge_section` / `ensure_section` / `reload_wtfconfig`）。
+- 加载顺序（各段相同）：
   1. 内置默认值。
-  2. `wtfconfig.ini` 中的 `[notify]` 段。
+  2. `wtfconfig.ini` 对应段（`[notify]` / `[img]` / `[memshell]`）。
   3. 环境变量（**优先级最高**）。
 - `wtfconfig.ini` 的查找路径：当前工作目录 → `resource/wtfconfig.ini` → `~/wtfconfig.ini`。
-- img 配置通过 `wtfutil.imgutil.img_config`，查找路径相同（`[img]` 段）。
-- memshell 配置通过 `wtfutil.memshellutil.memshell_config`（`[memshell]` / `MEMSHELL_BASE_URL`）。
+- 热加载：业务在使用前 `ensure_section`；仅当 ini path/mtime 变化时写回目标 dict 并（notify）重建通道列表；未变则保留运行时对手动改写的 dict。
+- 各模块字典：`notifyutil.push_config`、`imgutil.img_config`、`memshellutil.memshell_config`（`BASE_URL` ↔ env `MEMSHELL_BASE_URL`）。
 
 ---
 

@@ -14,7 +14,7 @@ Load order (later wins):
 2. `wtfconfig.ini` `[notify]` section
 3. Environment variables (highest)
 
-Located via `get_resource("wtfconfig.ini")`: cwd → `resource/wtfconfig.ini` → `~/wtfconfig.ini`.
+Located via `get_resource("wtfconfig.ini")`: cwd → `resource/wtfconfig.ini` → `~/wtfconfig.ini`. Loaded by [`configutil`](configutil.md); `send` hot-reloads on ini mtime and rebuilds enabled channels. Unchanged mtime keeps runtime edits to `push_config`.
 
 ```ini
 [notify]

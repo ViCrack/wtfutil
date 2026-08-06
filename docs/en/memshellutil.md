@@ -21,7 +21,7 @@ with MemShellParty() as client:
 
 ## Configuration
 
-Precedence: constructor `base_url=` > env `MEMSHELL_BASE_URL` > `wtfconfig.ini` `[memshell] BASE_URL` > default `https://party.mem.mk`.
+Precedence: constructor `base_url=` > env `MEMSHELL_BASE_URL` > `wtfconfig.ini` `[memshell] BASE_URL` > default `https://party.mem.mk` (via [`configutil`](configutil.md)).
 
 ## MemShellParty
 

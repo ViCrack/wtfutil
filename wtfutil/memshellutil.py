@@ -7,22 +7,18 @@ MemShellParty HTTP API 客户端：生成内存马 / 查询配置。
 
 from __future__ import annotations
 
-import os
-from pathlib import Path
 from typing import Any
 
-from configobj import ConfigObj
-
-from ._base import get_resource
+from .configutil import ensure_section
 from .httputil import RequestsSession, requests_session
 
 DEFAULT_BASE_URL = "https://party.mem.mk"
 
-memshell_config = {
+_MEMSHELL_DEFAULTS = {
     "BASE_URL": DEFAULT_BASE_URL,
 }
 
-_config_loaded = False
+memshell_config = dict(_MEMSHELL_DEFAULTS)
 
 # 请求体默认值：字段名对齐 MemShellGenerateRequest / ShellConfig / InjectorConfig / ShellToolConfigDTO
 # shellTool 默认 Behinder（冰蝎）；其余与官方 UI 常用默认一致
@@ -73,23 +69,16 @@ class MemShellPartyError(Exception):
         super().__init__(message)
 
 
-def _load_memshell_config() -> None:
-    """延迟加载 [memshell] 与环境变量 MEMSHELL_BASE_URL。"""
-    global _config_loaded
-    if _config_loaded:
-        return
-
-    config_path = get_resource("wtfconfig.ini")
-    if config_path and Path(config_path).exists():
-        cfg = ConfigObj(config_path, encoding="UTF-8")
-        if "memshell" in cfg:
-            for key, value in cfg["memshell"].items():
-                memshell_config[key.upper()] = str(value)
-
-    if os.getenv("MEMSHELL_BASE_URL"):
-        memshell_config["BASE_URL"] = os.getenv("MEMSHELL_BASE_URL")
-
-    _config_loaded = True
+def _load_memshell_config(*, force_reload: bool = False) -> None:
+    """延迟加载 [memshell] 与环境变量 MEMSHELL_BASE_URL（支持 ini 热更新）。"""
+    ensure_section(
+        memshell_config,
+        _MEMSHELL_DEFAULTS,
+        "memshell",
+        uppercase_keys=True,
+        env_map={"BASE_URL": "MEMSHELL_BASE_URL"},
+        force_reload=force_reload,
+    )
 
 
 def _deep_merge(base: dict, override: dict | None) -> dict:

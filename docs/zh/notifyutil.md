@@ -14,7 +14,7 @@ from wtfutil import send, push_config, feishu_bot
 2. `wtfconfig.ini` 的 `[notify]` 段
 3. 环境变量（**最高**）
 
-查找路径与 `get_resource("wtfconfig.ini")` 一致：当前工作目录 → `resource/wtfconfig.ini` → `~/wtfconfig.ini`。
+查找路径与 `get_resource("wtfconfig.ini")` 一致：当前工作目录 → `resource/wtfconfig.ini` → `~/wtfconfig.ini`。由 [`configutil`](configutil.md) 统一加载；`send` 前按 ini mtime 热更新，mtime 变化时重建启用通道列表。文件未改时保留对 `push_config` 的运行时手动改写。
 
 常用键示例：`CONSOLE`, `BARK_PUSH`, `FEISHU_KEY`, `FEISHU_SECRET`, `DD_BOT_TOKEN`, `DD_BOT_SECRET`, `TG_BOT_TOKEN`, `TG_USER_ID`, `SMTP_SERVER`, `SMTP_EMAIL`, `SMTP_PASSWORD`, `SHOWDOC_KEY`, `WEBHOOK_URL`, `WEBHOOK_METHOD`, `WEBHOOK_CONTENT_TYPE`, `WEBHOOK_BODY`, `HITOKOTO`, `SKIP_PUSH_TITLE` 等（完整列表见 `notifyutil.py` 默认值与 `wtfconfig.ini.example`）。
 
