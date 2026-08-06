@@ -12,10 +12,12 @@
 | `wtfutil.procutil` | [en/procutil.md](en/procutil.md) | [zh/procutil.md](zh/procutil.md) |
 | `wtfutil.notifyutil` | [en/notifyutil.md](en/notifyutil.md) | [zh/notifyutil.md](zh/notifyutil.md) |
 | `wtfutil.translateutil` | [en/translateutil.md](en/translateutil.md) | [zh/translateutil.md](zh/translateutil.md) |
+| `wtfutil.memshellutil` | [en/memshellutil.md](en/memshellutil.md) | [zh/memshellutil.md](zh/memshellutil.md) |
 | `wtfutil.imgutil` | [en/imgutil.md](en/imgutil.md) | [zh/imgutil.md](zh/imgutil.md) |
 | `wtfutil.singleinstance` | [en/singleinstance.md](en/singleinstance.md) | [zh/singleinstance.md](zh/singleinstance.md) |
 | **`pykill`（CLI）** | [en/pykill.md](en/pykill.md) | [zh/pykill.md](zh/pykill.md) |
+| **`memshell`（CLI）** | [en/memshellutil.md](en/memshellutil.md) | [zh/memshellutil.md](zh/memshellutil.md) |
 
-**配置**：`wtfconfig.ini` 的 `[notify]` / `[img]` 段见 [notifyutil](zh/notifyutil.md) / [imgutil](zh/imgutil.md)，摘要见根 README。
+**配置**：`wtfconfig.ini` 的 `[notify]` / `[img]` / `[memshell]` 段见对应模块文档，摘要见根 README。
 
 **包级导出**：`wtfutil/__init__.py` 的 `__all__` 为各子模块 `__all__` 的拼接；新增 API 时请同步对应 `docs/en/*.md` 与 `docs/zh/*.md`。

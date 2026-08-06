@@ -176,6 +176,17 @@ from .translateutil import (
     BaiduTranslateApi,
 )
 
+# ── 内存马（MemShellParty）────────────────────────────────────────────────────
+from .memshellutil import (
+    DEFAULT_BASE_URL,
+    MemShellParty,
+    MemShellPartyError,
+    build_generate_body,
+    extract_generate_meta,
+    memshell_config,
+    resolve_shell_credentials,
+)
+
 # ── 图片 ──────────────────────────────────────────────────────────────────────
 from .imgutil import (
     img_config,
@@ -257,6 +268,10 @@ __all__ = [
     'aiops_phone', 'showdoc', 'notifyx', 'chronocat', 'custom_notify',
     # translateutil
     'BaiduTranslateApi',
+    # memshellutil
+    'DEFAULT_BASE_URL', 'MemShellParty', 'MemShellPartyError',
+    'build_generate_body', 'extract_generate_meta', 'memshell_config',
+    'resolve_shell_credentials',
     # imgutil
     'img_config', 'ImageFetchError', 'fetch_random_bytes', 'random_avatar_bytes',
     # singleinstance

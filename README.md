@@ -315,6 +315,16 @@ pykill -c "celery worker"    # match by command-line substring
 
 Details: [docs/en/pykill.md](docs/en/pykill.md)
 
+`memshell` CLI (MemShellParty memory-shell generator):
+
+```bash
+memshell config
+memshell generate --shell-tool Behinder --shell-type Listener -o payload.txt
+memshell install-skill --project   # install to ./.agents/skills/memshell
+```
+
+Details: [docs/en/memshellutil.md](docs/en/memshellutil.md)
+
 ---
 
 ## Misc Utilities — `util`
@@ -367,9 +377,12 @@ WEBHOOK_URL =
 [img]
 APIHZ_IMG_ID =
 APIHZ_IMG_KEY =
+
+[memshell]
+# BASE_URL = https://party.mem.mk
 ```
 
-Full key list: `wtfconfig.ini.example`; API details: [notifyutil](docs/en/notifyutil.md), [imgutil](docs/en/imgutil.md).
+Full key list: `wtfconfig.ini.example`; API details: [notifyutil](docs/en/notifyutil.md), [imgutil](docs/en/imgutil.md), [memshellutil](docs/en/memshellutil.md).
 
 ---
 
@@ -384,10 +397,12 @@ Full key list: `wtfconfig.ini.example`; API details: [notifyutil](docs/en/notify
 | `wtfutil.procutil` | Windows process control (Windows only) | [EN](docs/en/procutil.md) · [ZH](docs/zh/procutil.md) |
 | `wtfutil.notifyutil` | Multi-channel push notifications | [EN](docs/en/notifyutil.md) · [ZH](docs/zh/notifyutil.md) |
 | `wtfutil.translateutil` | Baidu Translate API | [EN](docs/en/translateutil.md) · [ZH](docs/zh/translateutil.md) |
+| `wtfutil.memshellutil` | MemShellParty memory-shell SDK | [EN](docs/en/memshellutil.md) · [ZH](docs/zh/memshellutil.md) |
 | `wtfutil.imgutil` | Random avatar fetch (multi-source fallback) | [EN](docs/en/imgutil.md) · [ZH](docs/zh/imgutil.md) |
 | `wtfutil.singleinstance` | Single-instance lock (`SingleInstance`, `@single_instance`) | [EN](docs/en/singleinstance.md) · [ZH](docs/zh/singleinstance.md) |
 | `wtfutil.util` | Misc helpers, `get_resource`, `UniqueQueue` | [EN](docs/en/util.md) · [ZH](docs/zh/util.md) |
 | **`pykill`** (CLI) | List/kill Python processes (wraps `procutil`) | [EN](docs/en/pykill.md) · [ZH](docs/zh/pykill.md) |
+| **`memshell`** (CLI) | MemShellParty generate / install-skill | [EN](docs/en/memshellutil.md) · [ZH](docs/zh/memshellutil.md) |
 
 All public symbols are also exported at package top level: `from wtfutil import read_text, requests_session, send, ...`. See `wtfutil/__init__.py` `__all__`.
 

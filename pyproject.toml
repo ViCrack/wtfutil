@@ -53,6 +53,10 @@ Repository = "https://github.com/vicrack/wtfutil"
 
 [project.scripts]
 pykill = "wtfutil.pykill:main"
+memshell = "wtfutil.memshell:main"
 
 [tool.setuptools.packages.find]
 include = ["wtfutil*"]
+
+[tool.setuptools.package-data]
+wtfutil = ["skills/memshell/*"]

@@ -846,7 +846,6 @@ def ghost_bits_decode(data: str, encoding: str = 'utf-8', errors: str = 'ignore'
 def main():
     samples = (
         "class",
-        "../etc/passwd",
         "1.jsp",
         "MXVl",
         "公关广告.jsp",
@@ -861,7 +860,6 @@ def main():
         print()
 
     fixed_cases = (
-        ("㹣౬ᙡ⑳⑳", "Spring4Shell keyword"),
         ("ōŘŖŬ", "Base64 alphabet"),
         ("1.陪sp", "filename suffix"),
     )

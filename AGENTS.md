@@ -24,6 +24,7 @@ from wtfutil import sqlutil    # 数据库
 from wtfutil import procutil   # 进程管理（Windows）
 from wtfutil import notifyutil # 通知
 from wtfutil import translateutil # 翻译
+from wtfutil import memshellutil # MemShellParty 内存马生成
 from wtfutil import imgutil    # 随机图片/头像拉取
 from wtfutil import singleinstance # 单实例运行
 from wtfutil import util       # 杂项工具（UniqueQueue、measure_time、get_resource 等）
@@ -90,6 +91,17 @@ from wtfutil import util       # 杂项工具（UniqueQueue、measure_time、get
 - `wtfutil/translateutil.py`
   - 百度翻译封装：`BaiduTranslateApi(appid, appkey).translate(query, from_lang, to_lang)`。
 
+- `wtfutil/memshellutil.py`
+  - MemShellParty HTTP 客户端：`MemShellParty(base_url=...).generate(...)` 生成内存马；`get_config` / `get_packers_tree` / `get_command_configs`。
+  - 默认 `https://party.mem.mk`；`[memshell] BASE_URL` / env `MEMSHELL_BASE_URL`；默认 `shellTool=Behinder`；**无内置缓存**（调用方自行缓存）。
+  - 通用凭证：`password` / `key`（或 CLI `--password` / `--key`）按 `shellTool` 映射到 `behinderPass` / `godzillaPass`+`godzillaKey` / `antSwordPass`。
+  - 文档：`docs/en/memshellutil.md`、`docs/zh/memshellutil.md`；测试：`tests/test_memshell.py`（含可选 live 联调）。
+
+- `wtfutil/memshell.py`
+  - **CLI 工具**（`console_scripts`：`memshell=wtfutil.memshell:main`），**不在** `__init__.py` / `__all__`。
+  - 子命令：`generate`（`-o` 只写 packResult）、`config` / `packers` / `command-configs`、`install-skill`（`--global` / `--project` → `.agents/skills`）。
+  - Skill 源：`wtfutil/skills/memshell/SKILL.md`。
+
 - `wtfutil/imgutil.py`
   - 随机头像拉取（多源回退）：
     - `random_avatar_bytes()`：返回图片原始 `bytes`；内置 loliapi、dmoe、xjh、btstu、horosama 等直链/302 源，配置了 apihz 凭证时另含 JSON 源。
@@ -119,6 +131,7 @@ fileutil / httputil / strutil / sqlutil / procutil / singleinstance
 notifyutil（from ._base + from .httputil；_req 延迟初始化）
 imgutil（from ._base + from .httputil；config 延迟加载）
 translateutil（from . import util，仅方法内使用）
+memshellutil（from ._base + from .httputil；config 延迟加载）
       ↑
 util.py（杂项工具；re-export get_resource from _base）
       ↑
@@ -137,6 +150,7 @@ __init__.py（显式导出所有公开符号，不使用 wildcard import）
   3. 环境变量（**优先级最高**）。
 - `wtfconfig.ini` 的查找路径：当前工作目录 → `resource/wtfconfig.ini` → `~/wtfconfig.ini`。
 - img 配置通过 `wtfutil.imgutil.img_config`，查找路径相同（`[img]` 段）。
+- memshell 配置通过 `wtfutil.memshellutil.memshell_config`（`[memshell]` / `MEMSHELL_BASE_URL`）。
 
 ---
 
@@ -149,6 +163,7 @@ __init__.py（显式导出所有公开符号，不使用 wildcard import）
 3. 更新 **`docs/en/<module>.md`** 与 **`docs/zh/<module>.md`**（该模块的完整 API 说明）。
 4. 若新增模块或配置段：更新根 `README.md` / `README_zh.md` 的模块索引表或配置摘要，并更新 [`docs/README.md`](docs/README.md) 索引。
 5. 更新本文件 `AGENTS.md` 第 2 节中对应模块的简要说明（一行级）。
+6. **同步或补充测试用例**（`tests/`，stdlib `unittest` 即可）：覆盖核心行为、边界与错误路径；涉及外部 HTTP 服务的可增加 live 用例，并用环境变量（如 `MEMSHELL_SKIP_LIVE=1`）支持跳过联调。改完后应能跑通相关测试。
 
 ---
 

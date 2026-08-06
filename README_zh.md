@@ -307,6 +307,16 @@ pykill worker.py -l          # 仅列出，不终止
 pykill -c "celery worker"    # 按命令行子串匹配
 ```
 
+CLI 工具 `memshell`（MemShellParty 内存马生成）：
+
+```bash
+memshell config
+memshell generate --shell-tool Behinder --shell-type Listener -o payload.txt
+memshell install-skill --project   # 安装到 ./.agents/skills/memshell
+```
+
+详情见 [docs/zh/memshellutil.md](docs/zh/memshellutil.md)。
+
 ---
 
 ## 杂项工具 — `util`
@@ -360,9 +370,12 @@ WEBHOOK_URL =
 [img]
 APIHZ_IMG_ID =
 APIHZ_IMG_KEY =
+
+[memshell]
+# BASE_URL = https://party.mem.mk
 ```
 
-完整键列表见 `wtfconfig.ini.example`；API 详见 [notifyutil](docs/zh/notifyutil.md)、[imgutil](docs/zh/imgutil.md)。
+完整键列表见 `wtfconfig.ini.example`；API 详见 [notifyutil](docs/zh/notifyutil.md)、[imgutil](docs/zh/imgutil.md)、[memshellutil](docs/zh/memshellutil.md)。
 
 ---
 
@@ -377,10 +390,12 @@ APIHZ_IMG_KEY =
 | `wtfutil.procutil` | Windows 进程管理（仅 Windows） | [中文](docs/zh/procutil.md) · [EN](docs/en/procutil.md) |
 | `wtfutil.notifyutil` | 多通道通知推送 | [中文](docs/zh/notifyutil.md) · [EN](docs/en/notifyutil.md) |
 | `wtfutil.translateutil` | 百度翻译 API | [中文](docs/zh/translateutil.md) · [EN](docs/en/translateutil.md) |
+| `wtfutil.memshellutil` | MemShellParty 内存马生成 SDK | [中文](docs/zh/memshellutil.md) · [EN](docs/en/memshellutil.md) |
 | `wtfutil.imgutil` | 随机头像拉取（多源回退） | [中文](docs/zh/imgutil.md) · [EN](docs/en/imgutil.md) |
 | `wtfutil.singleinstance` | 单实例锁（`SingleInstance`、`@single_instance`） | [中文](docs/zh/singleinstance.md) · [EN](docs/en/singleinstance.md) |
 | `wtfutil.util` | 杂项工具、`get_resource`、`UniqueQueue` | [中文](docs/zh/util.md) · [EN](docs/en/util.md) |
 | **`pykill`**（CLI） | 列出/终止 Python 进程 | [中文](docs/zh/pykill.md) · [EN](docs/en/pykill.md) |
+| **`memshell`**（CLI） | MemShellParty 生成 / install-skill | [中文](docs/zh/memshellutil.md) · [EN](docs/en/memshellutil.md) |
 
 所有公开符号均可从包顶层直接导入，`from wtfutil import read_text, requests_session, send, ...`，与 `wtfutil/__init__.py` 的 `__all__` 一致。
 

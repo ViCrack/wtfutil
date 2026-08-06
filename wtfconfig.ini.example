@@ -8,3 +8,7 @@ APIHZ_IMG_ID = your_id
 APIHZ_IMG_KEY = your_key
 # APIHZ_IMGTYPE = 5
 # APIHZ_IMG_TYPE = 1
+
+[memshell]
+# MemShellParty 服务地址（可选；也可用环境变量 MEMSHELL_BASE_URL）
+# BASE_URL = https://party.mem.mk
