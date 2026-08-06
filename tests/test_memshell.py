@@ -42,6 +42,13 @@ class TestResolveShellCredentials(unittest.TestCase):
         self.assertEqual(c["godzilla_pass"], "")
         self.assertEqual(c["ant_sword_pass"], "")
 
+    def test_pass_maps_case_insensitive(self):
+        c = resolve_shell_credentials("behinder", password="p1")
+        self.assertEqual(c["behinder_pass"], "p1")
+        c2 = resolve_shell_credentials("GODZILLA", password="gp", key="gk")
+        self.assertEqual(c2["godzilla_pass"], "gp")
+        self.assertEqual(c2["godzilla_key"], "gk")
+
     def test_pass_maps_godzilla_with_key(self):
         c = resolve_shell_credentials("Godzilla", password="gp", key="gk")
         self.assertEqual(c["godzilla_pass"], "gp")
@@ -83,11 +90,72 @@ class TestBuildGenerateBody(unittest.TestCase):
         self.assertEqual(body["shellToolConfig"]["headerName"], "User-Agent")
         self.assertEqual(body["shellToolConfig"]["encryptor"], "")
 
-    def test_bypass_auto_when_jre_ge_53(self):
-        body = build_generate_body(target_jre_version=53)
+    def test_bypass_auto_when_jre_ge_9(self):
+        body = build_generate_body(jre=9)
         self.assertTrue(body["shellConfig"]["byPassJavaModule"])
-        body2 = build_generate_body(target_jre_version=53, by_pass_java_module=False)
+        self.assertEqual(body["shellConfig"]["targetJreVersion"], 53)
+        body2 = build_generate_body(jre=9, by_pass_java_module=False)
         self.assertFalse(body2["shellConfig"]["byPassJavaModule"])
+
+    def test_jre_release_maps_to_class_major(self):
+        self.assertEqual(build_generate_body(jre=6)["shellConfig"]["targetJreVersion"], 50)
+        self.assertEqual(build_generate_body(jre=8)["shellConfig"]["targetJreVersion"], 52)
+        self.assertEqual(build_generate_body(jre=11)["shellConfig"]["targetJreVersion"], 55)
+        self.assertEqual(build_generate_body(jre=17)["shellConfig"]["targetJreVersion"], 61)
+        self.assertEqual(build_generate_body(jre=21)["shellConfig"]["targetJreVersion"], 65)
+
+    def test_target_jre_version_accepts_release_or_class(self):
+        self.assertEqual(
+            build_generate_body(target_jre_version=8)["shellConfig"]["targetJreVersion"], 52
+        )
+        self.assertEqual(
+            build_generate_body(target_jre_version=53)["shellConfig"]["targetJreVersion"], 53
+        )
+
+    def test_jre_wins_over_target_jre_version(self):
+        body = build_generate_body(jre=17, target_jre_version=8)
+        self.assertEqual(body["shellConfig"]["targetJreVersion"], 61)
+
+    def test_case_insensitive_enums(self):
+        body = build_generate_body(
+            server="tomcat",
+            shell_tool="GODZILLA",
+            shell_type="filter",
+            password="p",
+            key="k",
+        )
+        self.assertEqual(body["shellConfig"]["server"], "Tomcat")
+        self.assertEqual(body["shellConfig"]["shellTool"], "Godzilla")
+        self.assertEqual(body["shellConfig"]["shellType"], "Filter")
+        self.assertEqual(body["shellToolConfig"]["godzillaPass"], "p")
+        self.assertEqual(body["shellToolConfig"]["godzillaKey"], "k")
+
+    def test_case_insensitive_via_body(self):
+        body = build_generate_body(
+            body={"shellConfig": {"server": "jetty", "shellTool": "behinder", "shellType": "LISTENER"}},
+        )
+        self.assertEqual(body["shellConfig"]["server"], "Jetty")
+        self.assertEqual(body["shellConfig"]["shellTool"], "Behinder")
+        self.assertEqual(body["shellConfig"]["shellType"], "Listener")
+
+    def test_unknown_enum_passthrough(self):
+        body = build_generate_body(server="MyCustomServer")
+        self.assertEqual(body["shellConfig"]["server"], "MyCustomServer")
+
+    def test_password_remaps_when_body_changes_tool(self):
+        body = build_generate_body(
+            password="p",
+            key="k",
+            body={"shellConfig": {"shellTool": "godzilla"}},
+        )
+        self.assertEqual(body["shellConfig"]["shellTool"], "Godzilla")
+        self.assertEqual(body["shellToolConfig"]["godzillaPass"], "p")
+        self.assertEqual(body["shellToolConfig"]["godzillaKey"], "k")
+        self.assertEqual(body["shellToolConfig"]["behinderPass"], "")
+
+    def test_invalid_jre_raises(self):
+        with self.assertRaises(ValueError):
+            build_generate_body(jre="abc")
 
     def test_command_defaults(self):
         body = build_generate_body(shell_tool="Command")
@@ -278,6 +346,77 @@ class TestMemshellCli(unittest.TestCase):
             self.assertEqual(kwargs.get("shell_tool"), "Godzilla")
             self.assertEqual(kwargs.get("password"), "gp")
             self.assertEqual(kwargs.get("key"), "gk")
+
+    def test_cli_case_insensitive_and_hidden_flags(self):
+        fake_result = {
+            "packResult": "X",
+            "memShellResult": {
+                "shellClassName": "S",
+                "injectorClassName": "I",
+                "shellConfig": {},
+                "shellToolConfig": {},
+                "injectorConfig": {},
+            },
+        }
+        with tempfile.TemporaryDirectory() as td:
+            out = Path(td) / "x.txt"
+            with mock.patch("wtfutil.memshell.MemShellParty") as cls:
+                inst = cls.return_value
+                inst.generate.return_value = fake_result
+                with mock.patch("sys.stdout", io.StringIO()):
+                    code = memshell_main(
+                        [
+                            "generate",
+                            "--server",
+                            "tomcat",
+                            "--shell-tool",
+                            "behinder",
+                            "--shell-type",
+                            "filter",
+                            "--jre",
+                            "9",
+                            "--behinder-pass",
+                            "hidden-ok",
+                            "--target-jre-version",
+                            "8",
+                            "-o",
+                            str(out),
+                        ]
+                    )
+            self.assertEqual(code, 0)
+            kwargs = inst.generate.call_args.kwargs
+            self.assertEqual(kwargs.get("server"), "tomcat")
+            self.assertEqual(kwargs.get("shell_tool"), "behinder")
+            self.assertEqual(kwargs.get("shell_type"), "filter")
+            self.assertEqual(kwargs.get("jre"), "9")
+            self.assertEqual(kwargs.get("behinder_pass"), "hidden-ok")
+            # --jre 优先，不应再带 target_jre_version
+            self.assertNotIn("target_jre_version", kwargs)
+
+    def test_cli_hidden_target_jre_still_works(self):
+        fake_result = {
+            "packResult": "Y",
+            "memShellResult": {
+                "shellClassName": "S",
+                "injectorClassName": "I",
+                "shellConfig": {},
+                "shellToolConfig": {},
+                "injectorConfig": {},
+            },
+        }
+        with tempfile.TemporaryDirectory() as td:
+            out = Path(td) / "y.txt"
+            with mock.patch("wtfutil.memshell.MemShellParty") as cls:
+                inst = cls.return_value
+                inst.generate.return_value = fake_result
+                with mock.patch("sys.stdout", io.StringIO()):
+                    code = memshell_main(
+                        ["generate", "--target-jre-version", "17", "-o", str(out)]
+                    )
+            self.assertEqual(code, 0)
+            kwargs = inst.generate.call_args.kwargs
+            self.assertEqual(kwargs.get("target_jre_version"), "17")
+            self.assertNotIn("jre", kwargs)
 
     def test_generate_empty_pack_uses_all_pack_results(self):
         fake_result = {

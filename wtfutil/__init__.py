@@ -188,11 +188,19 @@ from .translateutil import (
 # ── 内存马（MemShellParty）────────────────────────────────────────────────────
 from .memshellutil import (
     DEFAULT_BASE_URL,
+    JRE_RELEASE_TO_CLASS,
+    KNOWN_SERVERS,
+    KNOWN_SHELL_TOOLS,
+    KNOWN_SHELL_TYPES,
     MemShellParty,
     MemShellPartyError,
     build_generate_body,
+    canonicalize_server,
+    canonicalize_shell_tool,
+    canonicalize_shell_type,
     extract_generate_meta,
     memshell_config,
+    resolve_jre_class_version,
     resolve_shell_credentials,
 )
 
@@ -281,9 +289,13 @@ __all__ = [
     # translateutil
     'BaiduTranslateApi',
     # memshellutil
-    'DEFAULT_BASE_URL', 'MemShellParty', 'MemShellPartyError',
-    'build_generate_body', 'extract_generate_meta', 'memshell_config',
-    'resolve_shell_credentials',
+    'DEFAULT_BASE_URL', 'JRE_RELEASE_TO_CLASS',
+    'KNOWN_SERVERS', 'KNOWN_SHELL_TOOLS', 'KNOWN_SHELL_TYPES',
+    'MemShellParty', 'MemShellPartyError',
+    'build_generate_body',
+    'canonicalize_server', 'canonicalize_shell_tool', 'canonicalize_shell_type',
+    'extract_generate_meta', 'memshell_config',
+    'resolve_jre_class_version', 'resolve_shell_credentials',
     # imgutil
     'img_config', 'ImageFetchError', 'fetch_random_bytes', 'random_avatar_bytes',
     # singleinstance

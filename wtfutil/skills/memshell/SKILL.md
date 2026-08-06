@@ -18,25 +18,26 @@ memshell install-skill --global    # 或 --project
 
 ```bash
 memshell generate -o payload.txt \
-  --server Tomcat --shell-tool Behinder --shell-type Listener \
-  --target-jre-version 53 \
+  --server tomcat --shell-tool behinder --shell-type listener \
+  --jre 9 \
   --password PASS --header-name User-Agent --header-value SECRET
 ```
 
 - **`-o`**：文件只有 `packResult`；不要把 payload 贴进对话。
 - **stdout**：meta（类名、实际密码/头、`output` 路径）。
+- **`--server` / `--shell-tool` / `--shell-type`**：已知名称内不区分大小写。
 
-最小：`memshell generate -o payload.txt`（Tomcat+Behinder+Listener+JRE50+DefaultBase64）。
+最小：`memshell generate -o payload.txt`（Tomcat+Behinder+Listener+JRE6+DefaultBase64）。
 
 ## 参数含义（常用）
 
 | Flag | 用途 |
 |------|------|
-| `--server` | 目标中间件（Tomcat/Jetty/SpringWebMvc…） |
-| `--shell-tool` | 工具类型（Behinder/Godzilla/Command…） |
-| `--shell-type` | 挂载形态（Listener/Filter/Valve…），须与 tool 匹配 |
-| `--target-jre-version` | class 主版本：50/52/53/55/61/65 = Java6/8/9/11/17/21 |
-| `--by-pass-java-module` | 绕过 JDK9+ 模块（Unsafe defineClass）；JRE≥53 默认自动开 |
+| `--server` | 目标中间件（Tomcat/Jetty/SpringWebMvc…；不区分大小写） |
+| `--shell-tool` | 工具类型（Behinder/Godzilla/Command…；不区分大小写） |
+| `--shell-type` | 挂载形态（Listener/Filter/Valve…；不区分大小写），须与 tool 匹配 |
+| `--jre` | 目标 Java/JRE 发行版本：6 / 8 / 9 / 11 / 17 / 21（默认 6；JDK9+ 用 ≥9） |
+| `--by-pass-java-module` | 绕过 JDK9+ 模块（Unsafe defineClass）；JRE≥9 默认自动开 |
 | `--no-shrink` | 关闭缩小字节码（默认开 SKIP_DEBUG） |
 | `--debug` | 打印注入/异常调试信息 |
 | `--probe` | 回显探测模式（注入器放进回显马） |
@@ -44,7 +45,6 @@ memshell generate -o payload.txt \
 | `--url-pattern` | 挂载路径，默认 `/*` |
 | `--no-static-initialize` | 关闭静态块调构造（默认开） |
 | `--packer` | 打包格式（DefaultBase64/JSP/SpEL/AgentJar…） |
-| `--behinder-pass` / `--godzilla-pass` / `--godzilla-key` / `--ant-sword-pass` | 各工具专用密码；空=服务端随机 |
 | `--password` | **推荐**：通用密码，按 `--shell-tool` 自动写入对应 *Pass |
 | `--key` | 哥斯拉密钥（配合 Godzilla + `--password`） |
 | `--header-name` / `--header-value` | 入口特征头；匹配才进马；值空=随机 |

@@ -59,6 +59,110 @@ _DEFAULT_SHELL_TOOL_CONFIG = {
 
 _DEFAULT_PACKER = "DefaultBase64"
 
+# Java/JRE 发行版本 → 字节码 class 主版本（官方 API 的 targetJreVersion）
+JRE_RELEASE_TO_CLASS = {
+    6: 50,
+    7: 51,
+    8: 52,
+    9: 53,
+    10: 54,
+    11: 55,
+    12: 56,
+    13: 57,
+    14: 58,
+    15: 59,
+    16: 60,
+    17: 61,
+    18: 62,
+    19: 63,
+    20: 64,
+    21: 65,
+}
+
+# 官方常见写法（来自 party.mem.mk /api/config）；用于忽略大小写归一。
+# 可能滞后于上游；未命中则原样上传，可用 get_config() / memshell config 核对。
+KNOWN_SERVERS = (
+    "Apusic",
+    "BES",
+    "Dubbo",
+    "GlassFish",
+    "InforSuite",
+    "JBoss",
+    "Jetty",
+    "Jetty5",
+    "Resin",
+    "Resin2",
+    "SpringWebFlux",
+    "SpringWebMvc",
+    "Struts2",
+    "Tomcat",
+    "TongWeb",
+    "Undertow",
+    "WebLogic",
+    "WebSphere",
+    "XXLJOB",
+)
+
+KNOWN_SHELL_TOOLS = (
+    "AntSword",
+    "Behinder",
+    "Command",
+    "Custom",
+    "Godzilla",
+    "NeoreGeorg",
+    "Proxy",
+    "Suo5",
+    "Suo5v2",
+)
+
+KNOWN_SHELL_TYPES = (
+    "Action",
+    "AgentContextValve",
+    "AgentFilterChain",
+    "AgentFilterManager",
+    "AgentFrameworkServlet",
+    "AgentHandler",
+    "AgentServletContext",
+    "AgentServletHandler",
+    "AlibabaDubboService",
+    "ApacheDubboService",
+    "BypassNginxWebSocket",
+    "ControllerHandler",
+    "Customizer",
+    "Filter",
+    "Handler",
+    "HandlerFunction",
+    "HandlerMethod",
+    "Interceptor",
+    "JakartaControllerHandler",
+    "JakartaFilter",
+    "JakartaHandler",
+    "JakartaInterceptor",
+    "JakartaListener",
+    "JakartaProxyValve",
+    "JakartaServlet",
+    "JakartaValve",
+    "JakartaWebBypassNginxWebSocket",
+    "JakartaWebSocket",
+    "Listener",
+    "NettyHandler",
+    "ProxyValve",
+    "Servlet",
+    "Upgrade",
+    "Valve",
+    "WebFilter",
+    "WebSocket",
+)
+
+
+def _casefold_lookup(names: tuple[str, ...]) -> dict[str, str]:
+    return {n.casefold(): n for n in names}
+
+
+_SERVER_LOOKUP = _casefold_lookup(KNOWN_SERVERS)
+_SHELL_TOOL_LOOKUP = _casefold_lookup(KNOWN_SHELL_TOOLS)
+_SHELL_TYPE_LOOKUP = _casefold_lookup(KNOWN_SHELL_TYPES)
+
 
 class MemShellPartyError(Exception):
     """MemShellParty API 调用失败。"""
@@ -67,6 +171,51 @@ class MemShellPartyError(Exception):
         self.status_code = status_code
         self.body = body
         super().__init__(message)
+
+
+def resolve_jre_class_version(value: int | str) -> int:
+    """
+    将「JRE 发行版本」或「class 主版本」统一为官方 API 所需的 class 主版本。
+
+    - ``6`` / ``8`` / ``9`` / ``11`` / ``17`` / ``21`` 等 → 映射为 50/52/53/…
+    - 已是 class 主版本（如 ``50``、``61``）则原样返回
+    """
+    try:
+        v = int(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"invalid jre / target_jre_version: {value!r}") from exc
+    return JRE_RELEASE_TO_CLASS.get(v, v)
+
+
+def canonicalize_server(value: str) -> str:
+    """将 server 归一为官方大小写；未知名称原样返回。"""
+    if value is None or value == "":
+        return value
+    return _SERVER_LOOKUP.get(str(value).casefold(), value)
+
+
+def canonicalize_shell_tool(value: str) -> str:
+    """将 shell_tool 归一为官方大小写；未知名称原样返回。"""
+    if value is None or value == "":
+        return value
+    return _SHELL_TOOL_LOOKUP.get(str(value).casefold(), value)
+
+
+def canonicalize_shell_type(value: str) -> str:
+    """将 shell_type 归一为官方大小写；未知名称原样返回。"""
+    if value is None or value == "":
+        return value
+    return _SHELL_TYPE_LOOKUP.get(str(value).casefold(), value)
+
+
+def _canonicalize_shell_config(shell_config: dict) -> None:
+    """就地归一 shellConfig 中的 server / shellTool / shellType。"""
+    if "server" in shell_config and shell_config["server"]:
+        shell_config["server"] = canonicalize_server(shell_config["server"])
+    if "shellTool" in shell_config and shell_config["shellTool"]:
+        shell_config["shellTool"] = canonicalize_shell_tool(shell_config["shellTool"])
+    if "shellType" in shell_config and shell_config["shellType"]:
+        shell_config["shellType"] = canonicalize_shell_type(shell_config["shellType"])
 
 
 def _load_memshell_config(*, force_reload: bool = False) -> None:
@@ -107,13 +256,14 @@ def resolve_shell_credentials(
     """
     将通用 password/key 按 shellTool 映射到官方 shellToolConfig 字段。
 
+    ``shell_tool`` 在已知集合内不区分大小写。
     专用参数（behinder_pass / godzilla_pass 等）优先于通用 ``password`` / ``key``。
     - Behinder → behinderPass
     - Godzilla → godzillaPass；key → godzillaKey
     - AntSword → antSwordPass
     其它工具：通用 password 不写入；key 仅在显式传入时写入 godzillaKey（一般无意义）。
     """
-    tool = (shell_tool or "").strip()
+    tool = canonicalize_shell_tool((shell_tool or "").strip())
     gp = godzilla_pass or ""
     gk = godzilla_key or ""
     bp = behinder_pass or ""
@@ -145,7 +295,8 @@ def build_generate_body(
     server_version: str = "unknown",
     shell_tool: str = "Behinder",
     shell_type: str = "Listener",
-    target_jre_version: int | str = 50,
+    jre: int | str | None = None,
+    target_jre_version: int | str | None = None,
     debug: bool = False,
     by_pass_java_module: bool | None = None,
     shrink: bool = True,
@@ -174,36 +325,33 @@ def build_generate_body(
     组装官方 POST /api/memshell/generate 请求体（camelCase 字段）。
 
     kwargs 对应官方 JSON：serverVersion、shellTool、targetJreVersion、behinderPass 等。
-    也可传通用 ``password`` / ``key``，按 shellTool 自动映射（见 :func:`resolve_shell_credentials`）。
+    ``server`` / ``shell_tool`` / ``shell_type`` 在已知集合内**不区分大小写**
+    （如 ``tomcat`` → ``Tomcat``）；未知名称原样上传。
+    目标字节码版本请优先传 ``jre``（Java 发行版：6/8/9/11/17/21）；
+    ``target_jre_version`` 仍可用（发行版或 class 主版本均可，见 :func:`resolve_jre_class_version`）。
+    二者同时传入时以 ``jre`` 为准。默认 JRE 6。
+    也可传通用 ``password`` / ``key``，按**最终** shellTool 自动映射（见 :func:`resolve_shell_credentials`）；
+    若 ``body`` 覆盖了 shellTool，会在合并后再按新工具映射，避免密码写到错误字段。
     若同时传入 ``body``，则在 kwargs 组装结果上深度合并覆盖。
-    ``by_pass_java_module`` 为 None 时：targetJreVersion >= 53 自动 True。
+    ``body`` 内的 ``targetJreVersion`` 按官方语义原样使用（不会再做发行版换算）；发行版请用 kwargs ``jre``。
+    ``by_pass_java_module`` 为 None 时：解析后的 class 版本对应 Java 9+（≥53）自动 True。
     shellTool=Command 且未指定时，encryptor 默认 RAW，implementationClass 默认 RuntimeExec。
     """
-    jre = int(target_jre_version)
+    server = canonicalize_server(server)
+    shell_tool = canonicalize_shell_tool(shell_tool)
+    shell_type = canonicalize_shell_type(shell_type)
+
+    if jre is not None:
+        class_ver = resolve_jre_class_version(jre)
+    elif target_jre_version is not None:
+        class_ver = resolve_jre_class_version(target_jre_version)
+    else:
+        class_ver = JRE_RELEASE_TO_CLASS[6]
+
     if by_pass_java_module is None:
-        by_pass_java_module = jre >= 53
+        by_pass_java_module = class_ver >= JRE_RELEASE_TO_CLASS[9]
 
-    creds = resolve_shell_credentials(
-        shell_tool,
-        password=password,
-        key=key,
-        godzilla_pass=godzilla_pass,
-        godzilla_key=godzilla_key,
-        behinder_pass=behinder_pass,
-        ant_sword_pass=ant_sword_pass,
-    )
-    godzilla_pass = creds["godzilla_pass"]
-    godzilla_key = creds["godzilla_key"]
-    behinder_pass = creds["behinder_pass"]
-    ant_sword_pass = creds["ant_sword_pass"]
-
-    # Command 工具显式带上服务端同款默认，避免空串语义依赖后端 fromString 回退
-    if shell_tool == "Command":
-        if not encryptor:
-            encryptor = "RAW"
-        if not implementation_class:
-            implementation_class = "RuntimeExec"
-
+    # 专用凭证先写入；通用 password/key 等 merge + 最终 shellTool 确定后再映射
     built = {
         "shellConfig": {
             **_DEFAULT_SHELL_CONFIG,
@@ -211,7 +359,7 @@ def build_generate_body(
             "serverVersion": server_version,
             "shellTool": shell_tool,
             "shellType": shell_type,
-            "targetJreVersion": jre,
+            "targetJreVersion": class_ver,
             "debug": debug,
             "byPassJavaModule": by_pass_java_module,
             "shrink": shrink,
@@ -221,12 +369,12 @@ def build_generate_body(
         "shellToolConfig": {
             **_DEFAULT_SHELL_TOOL_CONFIG,
             "shellClassName": shell_class_name,
-            "godzillaPass": godzilla_pass,
-            "godzillaKey": godzilla_key,
+            "godzillaPass": godzilla_pass or "",
+            "godzillaKey": godzilla_key or "",
             "commandParamName": command_param_name,
             "commandTemplate": command_template,
-            "behinderPass": behinder_pass,
-            "antSwordPass": ant_sword_pass,
+            "behinderPass": behinder_pass or "",
+            "antSwordPass": ant_sword_pass or "",
             "headerName": header_name,
             "headerValue": header_value,
             "shellClassBase64": shell_class_base64,
@@ -244,9 +392,27 @@ def build_generate_body(
     if body:
         built = _deep_merge(built, body)
 
-    # body 覆盖后若变为 Command，同样补默认；若 body 改了 shellTool，再按最终 tool 用已写入字段即可
-    if built.get("shellConfig", {}).get("shellTool") == "Command":
-        stc = built.setdefault("shellToolConfig", {})
+    sc = built.get("shellConfig")
+    if isinstance(sc, dict):
+        _canonicalize_shell_config(sc)
+
+    stc = built.setdefault("shellToolConfig", {})
+    final_tool = (sc or {}).get("shellTool") or shell_tool
+    creds = resolve_shell_credentials(
+        final_tool,
+        password=password,
+        key=key,
+        godzilla_pass=stc.get("godzillaPass") or "",
+        godzilla_key=stc.get("godzillaKey") or "",
+        behinder_pass=stc.get("behinderPass") or "",
+        ant_sword_pass=stc.get("antSwordPass") or "",
+    )
+    stc["godzillaPass"] = creds["godzilla_pass"]
+    stc["godzillaKey"] = creds["godzilla_key"]
+    stc["behinderPass"] = creds["behinder_pass"]
+    stc["antSwordPass"] = creds["ant_sword_pass"]
+
+    if final_tool == "Command":
         if not stc.get("encryptor"):
             stc["encryptor"] = "RAW"
         if not stc.get("implementationClass"):
@@ -399,10 +565,18 @@ class MemShellParty:
 
 __all__ = [
     "DEFAULT_BASE_URL",
+    "JRE_RELEASE_TO_CLASS",
+    "KNOWN_SERVERS",
+    "KNOWN_SHELL_TOOLS",
+    "KNOWN_SHELL_TYPES",
     "MemShellParty",
     "MemShellPartyError",
     "build_generate_body",
+    "canonicalize_server",
+    "canonicalize_shell_tool",
+    "canonicalize_shell_type",
     "extract_generate_meta",
     "memshell_config",
+    "resolve_jre_class_version",
     "resolve_shell_credentials",
 ]

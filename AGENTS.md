@@ -100,6 +100,8 @@ from wtfutil import util       # 杂项工具（UniqueQueue、measure_time、get
 - `wtfutil/memshellutil.py`
   - MemShellParty HTTP 客户端：`MemShellParty(base_url=...).generate(...)` 生成内存马；`get_config` / `get_packers_tree` / `get_command_configs`。
   - 默认 `https://party.mem.mk`；`[memshell] BASE_URL` / env `MEMSHELL_BASE_URL`（经 `configutil`）；默认 `shellTool=Behinder`；**无内置缓存**（调用方自行缓存）。
+  - 目标运行时用 `jre=` / CLI `--jre`（6/8/9/11/17/21）；兼容 `target_jre_version`。
+  - `server` / `shell_tool` / `shell_type` 已知名称内忽略大小写。
   - 通用凭证：`password` / `key`（或 CLI `--password` / `--key`）按 `shellTool` 映射到 `behinderPass` / `godzillaPass`+`godzillaKey` / `antSwordPass`。
   - 文档：`docs/en/memshellutil.md`、`docs/zh/memshellutil.md`；测试：`tests/test_memshell.py`（含可选 live 联调）。
 

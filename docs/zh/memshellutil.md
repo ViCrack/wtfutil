@@ -17,9 +17,9 @@ from wtfutil import MemShellParty, MemShellPartyError
 
 with MemShellParty() as client:
     result = client.generate(
-        shell_tool="Behinder",
-        shell_type="Listener",
-        target_jre_version=53,   # Java 9+；未指定时自动 byPassJavaModule=True
+        shell_tool="behinder",   # 不区分大小写
+        shell_type="listener",
+        jre=9,                   # Java/JRE 发行版本；≥9 时自动 byPassJavaModule=True
         password="pass",         # 通用密码 → behinderPass
         header_value="secret",   # 请求头门槛（默认 header_name=User-Agent）
     )
@@ -113,6 +113,8 @@ with MemShellParty() as client:
 
 `generate(**kwargs)` 使用 **snake_case**，SDK 会组装成官方 camelCase JSON。也可传入完整 `body=` 字典；与 kwargs 同时存在时，**body 深度合并覆盖** kwargs 结果。
 
+**大小写**：`server` / `shell_tool` / `shell_type` 在已知官方名称内**不区分大小写**（`tomcat` → `Tomcat`，`GODZILLA` → `Godzilla`）。未知名称原样上传。已知表可能滞后于上游，可用 `get_config()` / `memshell config` 核对。
+
 ### 内置默认（对齐官方常用 UI）
 
 | 维度 | 默认值 |
@@ -120,13 +122,13 @@ with MemShellParty() as client:
 | 中间件 `server` | `Tomcat` |
 | 工具 `shell_tool` | **`Behinder`（冰蝎）** |
 | 挂载 `shell_type` | `Listener` |
-| 字节码 `target_jre_version` | `50`（Java 6） |
+| 目标运行时 `jre` | `6`（Java 6；常用另有 8 / 9 / 11 / 17 / 21） |
 | `server_version` | `"unknown"`（多数场景不用改） |
 | 缩小字节码 `shrink` | `True` |
 | 静态初始化 `static_initialize` | `True` |
 | 打包 `packer` | `DefaultBase64` |
 | 入口头 `header_name` | `User-Agent` |
-| `by_pass_java_module` | 未指定时：JRE ≥ 53 自动 `True`，否则 `False` |
+| `by_pass_java_module` | 未指定时：`jre ≥ 9` 自动 `True`，否则 `False` |
 
 `shell_tool="Command"` 且未指定时：`encryptor="RAW"`，`implementation_class="RuntimeExec"`。
 
@@ -136,7 +138,7 @@ with MemShellParty() as client:
 |------|------|
 | `password="x"` | 按当前 `shell_tool` 映射到冰蝎 / 哥斯拉 / 蚁剑的 `*Pass` |
 | `key="k"` | 写入哥斯拉 `godzillaKey`（其它工具一般无意义） |
-| `behinder_pass` / `godzilla_pass` / `godzilla_key` / `ant_sword_pass` | **专用字段优先于** 通用 `password` / `key` |
+| `behinder_pass` / `godzilla_pass` / `godzilla_key` / `ant_sword_pass` | 高级：专用字段优先于通用 `password` / `key`（日常用通用即可） |
 | 密码类留空 | 服务端随机生成，结果在 `memShellResult.shellToolConfig` 中回传 |
 | `header_name` + `header_value` | 匹配该请求头后才进入马逻辑；`header_value` 常需自行设定 |
 
@@ -161,11 +163,12 @@ client.generate(shell_tool="Behinder", password="ignored", behinder_pass="real")
 
 | kwargs | 官方字段 | 含义 |
 |--------|----------|------|
-| `server` | shellConfig.server | 目标中间件/框架（Tomcat、Jetty、SpringWebMvc…） |
+| `server` | shellConfig.server | 目标中间件（不区分大小写）：Tomcat、Jetty、SpringWebMvc… |
 | `server_version` | shellConfig.serverVersion | 服务版本；少数挂载因包名差异才需要 |
-| `shell_tool` | shellConfig.shellTool | Behinder / Godzilla / Command / AntSword… |
-| `shell_type` | shellConfig.shellType | Listener / Filter / Valve / Servlet / Agent… |
-| `target_jre_version` | shellConfig.targetJreVersion | class 主版本，见下表 |
+| `shell_tool` | shellConfig.shellTool | Behinder / Godzilla / Command…（不区分大小写） |
+| `shell_type` | shellConfig.shellType | Listener / Filter / Valve…（不区分大小写） |
+| `jre` | shellConfig.targetJreVersion | **推荐**：Java/JRE 发行版本 `6` / `8` / `9` / `11` / `17` / `21` |
+| `target_jre_version` | 同上 | 高级兼容；可传发行版或官方 class 主版本；与 `jre` 同时出现时以 `jre` 为准。`body` 里的 `targetJreVersion` 按官方原样使用、不再换算 |
 | `debug` | shellConfig.debug | 注入器打印注入信息，Shell 打印异常堆栈 |
 | `by_pass_java_module` | shellConfig.byPassJavaModule | 绕过 JDK9+ 模块限制（Unsafe defineClass） |
 | `shrink` | shellConfig.shrink | 缩小字节码（ASM SKIP_DEBUG）；默认 True |
@@ -175,10 +178,10 @@ client.generate(shell_tool="Behinder", password="ignored", behinder_pass="real")
 | `injector_class_name` | injectorConfig.injectorClassName | 注入器全限定类名；空则随机 |
 | `static_initialize` | injectorConfig.staticInitialize | 静态块调构造，适配 `Class.forName(..., true, ...)` |
 | `shell_class_name` | shellToolConfig.shellClassName | Shell 全限定类名；空则随机 |
-| `behinder_pass` | behinderPass | 冰蝎密码 |
-| `godzilla_pass` / `godzilla_key` | godzillaPass / godzillaKey | 哥斯拉密码/密钥 |
-| `ant_sword_pass` | antSwordPass | 蚁剑密码 |
-| `password` / `key` | （按工具映射） | 通用凭证，见上节 |
+| `behinder_pass` | behinderPass | 高级：冰蝎密码（优先用 `password`） |
+| `godzilla_pass` / `godzilla_key` | godzillaPass / godzillaKey | 高级：哥斯拉密码/密钥（优先用 `password` / `key`） |
+| `ant_sword_pass` | antSwordPass | 高级：蚁剑密码（优先用 `password`） |
+| `password` / `key` | （按工具映射） | **推荐**通用凭证 |
 | `header_name` / `header_value` | headerName / headerValue | 入口特征请求头 |
 | `command_param_name` | commandParamName | Command：命令参数名或头名 |
 | `command_template` | commandTemplate | Command：模板，`{command}` 占位 |
@@ -187,18 +190,7 @@ client.generate(shell_tool="Behinder", password="ignored", behinder_pass="real")
 | `shell_class_base64` | shellClassBase64 | Custom：自定义 `.class` 的 Base64 |
 | `packer` | packer | 打包格式（DefaultBase64、JSP、SpEL…） |
 
-### JRE class 版本
-
-| Java | `target_jre_version` |
-|------|----------------------|
-| 6 | 50 |
-| 8 | 52 |
-| 9 | 53 |
-| 11 | 55 |
-| 17 | 61 |
-| 21 | 65 |
-
-目标运行时是 JDK 9+ 时，建议至少 `53`，以便自动打开模块绕过。
+目标运行时是 JDK 9+ 时，传 `jre=9`（或更高），以便自动打开模块绕过。
 
 ---
 
@@ -243,7 +235,7 @@ with MemShellParty() as client:
         server="Tomcat",
         shell_tool="Behinder",
         shell_type="Filter",
-        target_jre_version=52,
+        jre=8,
         url_pattern="/*",
         password="admin",
         header_name="User-Agent",
@@ -261,7 +253,7 @@ with MemShellParty() as client:
     r = client.generate(
         shell_tool="Command",
         shell_type="Listener",
-        target_jre_version=53,
+        jre=9,
         command_param_name="cmd",
         encryptor="RAW",
         implementation_class="RuntimeExec",
@@ -279,7 +271,7 @@ body = {
     "packer": "DefaultBase64",
 }
 # 仍会先按 kwargs 默认组装，再用 body 深度覆盖
-result = client.generate(body=body, target_jre_version=53)
+result = client.generate(body=body, jre=9)
 ```
 
 也可只组装请求体、稍后再发：
@@ -322,8 +314,12 @@ except MemShellPartyError as e:
 | 符号 | 说明 |
 |------|------|
 | `DEFAULT_BASE_URL` | 默认服务根地址常量 |
+| `JRE_RELEASE_TO_CLASS` | JRE 发行版 → class 主版本映射（一般无需直接使用） |
+| `KNOWN_SERVERS` / `KNOWN_SHELL_TOOLS` / `KNOWN_SHELL_TYPES` | 大小写归一用的已知名称表 |
+| `canonicalize_server` / `canonicalize_shell_tool` / `canonicalize_shell_type` | 单独归一化 |
 | `memshell_config` | 运行时配置 dict（`BASE_URL`） |
 | `build_generate_body(...)` | 只组装请求体，不发 HTTP |
+| `resolve_jre_class_version(...)` | 将 `jre`/发行版或 class 主版本统一为 API 数字 |
 | `resolve_shell_credentials(...)` | 将 `password`/`key` 映射到专用凭证字段 |
 | `extract_generate_meta(result, output=...)` | 从响应提取紧凑 meta |
 | `MemShellPartyError` | API / 协议错误 |
@@ -337,7 +333,7 @@ except MemShellPartyError as e:
 ```bash
 memshell generate --help
 memshell generate -o payload.txt
-memshell generate --shell-tool Godzilla --shell-type Filter --target-jre-version 53 -o out.txt
+memshell generate --shell-tool Godzilla --shell-type Filter --jre 9 -o out.txt
 memshell config
 memshell packers
 memshell install-skill --project
@@ -345,8 +341,11 @@ memshell install-skill --project
 
 - **`-o PATH`**：文件只写 `packResult`；stdout 为 meta JSON。
 - **无 `-o`**：stdout 完整响应 JSON。
+- **`--jre`**：目标 Java 发行版本（6/8/9/11/17/21）。
+- **`--server` / `--shell-tool` / `--shell-type`**：已知名称内不区分大小写。
+- 日常用 `--password` / `--key` 即可；专用 `*-pass` 与 `--target-jre-version` 仍可用但不在 `--help` 中展示。
 
-参数与上表 kwargs 一一对应，详见 `memshell generate --help`。
+参数与上表 kwargs 对应，详见 `memshell generate --help`。
 
 ---
 
