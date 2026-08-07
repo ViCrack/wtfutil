@@ -50,8 +50,8 @@ session = httputil.requests_session()
 
 - `wtfutil/httputil.py`
   - HTTP 工具封装：
-    - `requests_session`：带代理、重试、超时、TLS、分块传输、速率限制等增强能力的会话工厂；默认校验证书。
-    - 导入模块不修改全局 SSL、requests、urllib3 或系统代理；兼容补丁必须由调用方显式启用。
+    - `requests_session`：带代理、重试、超时、TLS、分块传输、速率限制等增强能力的会话工厂；为方便探测和旧环境兼容，默认 `verify=False`，调用方可显式传 `verify=True` 或 CA bundle。
+    - 导入模块会把进程级默认 HTTPS context 切换为 unverified，并屏蔽 urllib3 的 `InsecureRequestWarning`；这是必须保留的兼容契约。导入不会修改全局 `requests.Session`、urllib3 连接类或系统代理函数，其余全局兼容补丁由调用方显式启用。
     - `httpraw`：发送原始 HTTP 报文。
     - URL/IP/域名工具：`is_private_ip`、`get_maindomain`、`url2ip`、`is_wildcard_dns_batch` 等。
     - TLS 适配器：`CustomSslContextHttpAdapter`、`DESAdapter`。
@@ -99,7 +99,7 @@ session = httputil.requests_session()
 - `wtfutil/memshellutil.py`
   - MemShellParty HTTP 客户端：`MemShellParty(base_url=...).generate(...)` 生成内存马；`get_config` / `get_packers_tree` / `get_command_configs`。
   - 默认 `https://party.mem.mk`；`[memshell] BASE_URL` / env `MEMSHELL_BASE_URL`（经 `configutil`）；默认 `shellTool=Behinder`；**无内置缓存**（调用方自行缓存）。
-  - 目标运行时用 `jre=` / CLI `--jre`（6/8/9/11/17/21）；兼容 `target_jre_version`。
+  - 目标运行时用 `jre=` / CLI `--jre`（6/8/9/11/17/21/22，后续版本按标准映射）；兼容 `target_jre_version`。
   - `server` / `shell_tool` / `shell_type` 已知名称内忽略大小写。
   - 通用凭证：`password` / `key`（或 CLI `--password` / `--key`）按 `shellTool` 映射到 `behinderPass` / `godzillaPass`+`godzillaKey` / `antSwordPass`。
   - 文档：`docs/en/memshellutil.md`、`docs/zh/memshellutil.md`；测试：`tests/test_memshell.py`（含可选 live 联调）。

@@ -37,7 +37,7 @@ _GENERATE_EPILOG = """
 常用参数（server / shell-tool / shell-type 在已知名称内不区分大小写）：
 
   --server / --shell-tool / --shell-type   中间件、工具、挂载类型（默认 Tomcat / Behinder / Listener）
-  --jre                                   目标 Java 发行版本：6/8/9/11/17/21（默认 6；JDK9+ 用 ≥9）
+  --jre                                   目标 Java 发行版本：6/8/9/11/17/21/22（默认 6；JDK9+ 用 ≥9）
   --password / --key                      通用密码；哥斯拉再加 --key
   --header-name / --header-value          入口特征请求头（默认名 User-Agent）
   --packer / --url-pattern                打包格式与挂载路径
@@ -307,7 +307,7 @@ def main(argv: list[str] | None = None) -> int:
     p_gen.add_argument(
         "--jre",
         default=None,
-        help="目标 Java/JRE 发行版本：6/8/9/11/17/21（推荐；默认 6）",
+        help="目标 Java/JRE 发行版本：6/8/9/11/17/21/22（推荐；默认 6）",
     )
     p_gen.add_argument(
         "--target-jre-version",

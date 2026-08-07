@@ -37,7 +37,9 @@ telegram_bot("告警", "任务失败")
 
 ## send(title, content)
 
-并发调用所有已配置通道。每个工作线程独立创建并关闭 HTTP Session，不在线程间共享可变的 Requests 状态；单个通道异常只记录日志，不阻断其它通道完成。内容为空则记录错误；可通过 `HITOKOTO` 追加一言；`SKIP_PUSH_TITLE` 可跳过标题。
+并发调用所有已配置通道。每个工作线程独立创建并关闭 HTTP Session，不在线程间共享可变的 Requests 状态；单个通道异常只记录日志，不阻断其它通道完成。内容为空则记录错误；可通过 `HITOKOTO` 追加一言，一言调用失败时会记录日志并继续发送原始通知；`SKIP_PUSH_TITLE` 可跳过标题。
+
+代码内置的公网 PushPlus 与 AIOps 地址仅使用 HTTPS，不会回退到明文 HTTP；用户显式配置的本机服务和 HTTP 代理地址仍受支持。
 
 ## one()
 

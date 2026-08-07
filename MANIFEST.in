@@ -1,2 +1,2 @@
 prune tests
-global-exclude __pycache__ *.py[cod]
+global-exclude __pycache__ *.py[cod] test_*.py *_test.py

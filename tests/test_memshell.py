@@ -107,6 +107,7 @@ class TestBuildGenerateBody(unittest.TestCase):
         self.assertEqual(build_generate_body(jre=11)["shellConfig"]["targetJreVersion"], 55)
         self.assertEqual(build_generate_body(jre=17)["shellConfig"]["targetJreVersion"], 61)
         self.assertEqual(build_generate_body(jre=21)["shellConfig"]["targetJreVersion"], 65)
+        self.assertEqual(build_generate_body(jre=22)["shellConfig"]["targetJreVersion"], 66)
 
     def test_target_jre_version_accepts_release_or_class(self):
         self.assertEqual(
@@ -191,6 +192,26 @@ class TestBuildGenerateBody(unittest.TestCase):
         self.assertEqual(body["packer"], "GzipBase64")
         self.assertEqual(body["shellConfig"]["server"], "Tomcat")
 
+    def test_body_rejects_non_object_nested_configs(self):
+        invalid_fields = (
+            "shellConfig",
+            "shellToolConfig",
+            "injectorConfig",
+        )
+        for invalid_field in invalid_fields:
+            with (
+                self.subTest(invalid_field=invalid_field),
+                self.assertRaisesRegex(
+                    TypeError,
+                    rf"body\.{invalid_field} must be an object",
+                ),
+            ):
+                build_generate_body(body={invalid_field: "invalid"})
+
+    def test_body_rejects_non_dictionary_value(self):
+        with self.assertRaisesRegex(TypeError, "body must be a dictionary"):
+            build_generate_body(body="invalid")
+
     def test_camelcase_official_fields(self):
         body = build_generate_body(
             behinder_pass="p",
@@ -230,6 +251,41 @@ class TestExtractGenerateMeta(unittest.TestCase):
         self.assertNotIn("fooBytes", meta["injectorConfig"])
         self.assertEqual(meta["injectorConfig"]["urlPattern"], "/*")
         self.assertNotIn("packResult", meta)
+
+    def test_rejects_invalid_nested_response_objects(self):
+        invalid_nested_values = (None, False, 0, "", [], "invalid")
+        for invalid_nested_value in invalid_nested_values:
+            with (
+                self.subTest(
+                    field="memShellResult",
+                    invalid_nested_value=invalid_nested_value,
+                ),
+                self.assertRaisesRegex(
+                    TypeError,
+                    "memShellResult must be an object",
+                ),
+            ):
+                extract_generate_meta(
+                    {"memShellResult": invalid_nested_value}
+                )
+
+            with (
+                self.subTest(
+                    field="injectorConfig",
+                    invalid_nested_value=invalid_nested_value,
+                ),
+                self.assertRaisesRegex(
+                    TypeError,
+                    "injectorConfig must be an object",
+                ),
+            ):
+                extract_generate_meta(
+                    {
+                        "memShellResult": {
+                            "injectorConfig": invalid_nested_value,
+                        }
+                    }
+                )
 
 
 class TestMemShellPartyClient(unittest.TestCase):
@@ -422,6 +478,27 @@ class TestMemshellCli(unittest.TestCase):
             self.assertEqual(kwargs.get("target_jre_version"), "17")
             self.assertNotIn("jre", kwargs)
 
+    def test_cli_reports_invalid_nested_body_without_traceback(self):
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            body_path = Path(temporary_directory) / "body.json"
+            body_path.write_text(
+                json.dumps({"shellConfig": "invalid"}),
+                encoding="utf-8",
+            )
+            error_output = io.StringIO()
+            with mock.patch("wtfutil.memshell.MemShellParty") as client_class:
+                client_class.return_value.generate.side_effect = (
+                    lambda body, **kwargs: build_generate_body(body, **kwargs)
+                )
+                with mock.patch("sys.stderr", error_output):
+                    code = memshell_main(
+                        ["generate", "--body", str(body_path), "--body-only"]
+                    )
+
+        self.assertEqual(code, 1)
+        self.assertIn("body.shellConfig must be an object", error_output.getvalue())
+        self.assertNotIn("Traceback", error_output.getvalue())
+
     def test_generate_empty_pack_uses_all_pack_results(self):
         fake_result = {
             "packResult": "",
@@ -436,10 +513,12 @@ class TestMemshellCli(unittest.TestCase):
         }
         with tempfile.TemporaryDirectory() as td:
             out = Path(td) / "payload.json"
-            with mock.patch("wtfutil.memshell.MemShellParty") as cls:
+            with (
+                mock.patch("wtfutil.memshell.MemShellParty") as cls,
+                mock.patch("sys.stdout", io.StringIO()),
+            ):
                 cls.return_value.generate.return_value = fake_result
-                with mock.patch("sys.stdout", io.StringIO()):
-                    code = memshell_main(["generate", "-o", str(out)])
+                code = memshell_main(["generate", "-o", str(out)])
             self.assertEqual(code, 0)
             data = json.loads(out.read_text(encoding="utf-8"))
             self.assertEqual(data["GzipBase64"], "y")
@@ -447,9 +526,11 @@ class TestMemshellCli(unittest.TestCase):
     def test_install_skill_project(self):
         with tempfile.TemporaryDirectory() as td:
             td_path = Path(td)
-            with mock.patch("wtfutil.memshell.Path.cwd", return_value=td_path):
-                with mock.patch("sys.stdout", io.StringIO()):
-                    code = memshell_main(["install-skill", "--project"])
+            with (
+                mock.patch("wtfutil.memshell.Path.cwd", return_value=td_path),
+                mock.patch("sys.stdout", io.StringIO()),
+            ):
+                code = memshell_main(["install-skill", "--project"])
             self.assertEqual(code, 0)
             skill = td_path / ".agents" / "skills" / "memshell" / "SKILL.md"
             self.assertTrue(skill.is_file())

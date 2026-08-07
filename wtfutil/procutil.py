@@ -6,7 +6,10 @@ import re
 
 import psutil
 
-_PYTHON_NAME_RE = re.compile(r"^pythonw?(\d+(?:\.\d+)*)?(?:\.exe)?$", re.IGNORECASE)
+_PYTHON_NAME_RE = re.compile(
+    r"^(?:pythonw?|pypy)(\d+(?:\.\d+)*)?(?:\.exe)?$",
+    re.IGNORECASE,
+)
 
 
 def _require_non_empty_text(value: str, parameter_name: str) -> str:

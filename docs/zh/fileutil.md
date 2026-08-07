@@ -10,7 +10,7 @@ from wtfutil.fileutil import JarAnalyzer, read_lines, read_text, write_json
 
 | 符号 | 参数要点 | 说明 |
 |------|----------|------|
-| `read_text(filepath, mode='r', encoding='utf-8', not_exists_ok=False, errors=None)` | 文本模式返回 `str`；任意二进制模式返回 `bytes`；允许缺失时二进制返回 `b''` | 读整个文件 |
+| `read_text(filepath, mode='r', encoding='utf-8', not_exists_ok=False, errors=None)` | 只读文本/二进制模式返回 `str`/`bytes`；写入、追加、创建或更新模式会在打开文件前抛出 `ValueError`；允许缺失时二进制返回 `b''` | 读整个文件 |
 | `read_json(filepath, encoding='utf-8', not_exists_ok=False)` | 不存在且 `not_exists_ok=True` 返回 `{}` | JSON → dict |
 | `read_lines(filepath, encoding='utf-8', not_exists_ok=False, unique=False)` | 跳过空行；`unique=True` 保序去重 | 行列表 |
 | `write_text` / `write_lines` / `write_json` | 写文件 | 见下方示例 |
@@ -33,7 +33,7 @@ print(file_md5("app.zip"))
 
 ## JarAnalyzer
 
-构造时传入 `.jar` 路径；分析 JDK 线索、Spring Boot、`javaw`、Main-Class 等。GUI 分析优先使用本机 **`javap`**；命令不存在、失败或超过 30 秒时回退到 JAR 字节检查。
+构造时传入 `.jar` 路径；分析 JDK 线索、Spring Boot、`javaw`、Main-Class 等。支持 Manifest continuation line，以及 Java 22 和后续 class major 映射。GUI 分析优先使用本机 **`javap`**；命令不存在、失败或超过 30 秒时回退到 JAR 字节检查。
 
 ```python
 from wtfutil.fileutil import JarAnalyzer

@@ -111,6 +111,8 @@ Invalid combos fail on the server; the SDK raises `MemShellPartyError`.
 
 `generate(**kwargs)` uses **snake_case**; the SDK builds official camelCase JSON. You may also pass a full `body=` dict. When both are present, **body deep-merges over** the kwargs-built payload.
 
+`body` must be a JSON-style object. Its `shellConfig`, `shellToolConfig`, and `injectorConfig` fields must also be objects; invalid nested types raise `TypeError` locally before any generate request is sent. `extract_generate_meta()` applies the same object validation to the corresponding response fields.
+
 **Case**: `server` / `shell_tool` / `shell_type` are **case-insensitive** within the known official names (`tomcat` → `Tomcat`, `GODZILLA` → `Godzilla`). Unknown names are sent as-is. The known list may lag upstream; check with `get_config()` / `memshell config`.
 
 ### Built-in defaults (aligned with the official UI)
@@ -120,7 +122,7 @@ Invalid combos fail on the server; the SDK raises `MemShellPartyError`.
 | `server` | `Tomcat` |
 | `shell_tool` | **`Behinder`** |
 | `shell_type` | `Listener` |
-| `jre` | `6` (Java 6; also common: 8 / 9 / 11 / 17 / 21) |
+| `jre` | `6` (Java 6; also common: 8 / 9 / 11 / 17 / 21 / 22) |
 | `server_version` | `"unknown"` (rarely needed) |
 | `shrink` | `True` |
 | `static_initialize` | `True` |
@@ -165,7 +167,7 @@ client.generate(shell_tool="Behinder", password="ignored", behinder_pass="real")
 | `server_version` | shellConfig.serverVersion | Server version; only needed for a few mount types |
 | `shell_tool` | shellConfig.shellTool | Behinder / Godzilla / Command… (case-insensitive) |
 | `shell_type` | shellConfig.shellType | Listener / Filter / Valve… (case-insensitive) |
-| `jre` | shellConfig.targetJreVersion | **Preferred**: Java/JRE release `6` / `8` / `9` / `11` / `17` / `21` |
+| `jre` | shellConfig.targetJreVersion | **Preferred**: Java/JRE release `6` / `8` / `9` / `11` / `17` / `21` / `22`; later releases are converted by the standard `release + 44` mapping |
 | `target_jre_version` | same | Advanced/legacy; release or official class major; `jre` wins if both set. A `targetJreVersion` inside `body` is sent as-is (no release conversion) |
 | `debug` | shellConfig.debug | Injector prints inject info; shell prints stack traces |
 | `by_pass_java_module` | shellConfig.byPassJavaModule | Bypass JDK9+ modules via Unsafe defineClass |

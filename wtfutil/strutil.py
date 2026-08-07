@@ -456,6 +456,9 @@ def get_middle_text(text: str, start_delim: str, end_delim: str, position: int =
     :param position: 要提取的部分索引（0表示第一个匹配，1表示第二个匹配，以此类推）
     :return: 指定索引的中间文本，如果没有找到则返回空字符串
     """
+    if not start_delim or not end_delim:
+        raise ValueError("start_delim and end_delim must not be empty")
+
     # 存储所有匹配的部分
     matches = []
     start = 0
@@ -583,7 +586,10 @@ def string_to_bash_variable(string: str) -> str:
 
     invalid_chars = ['.', '/', '-', '=', '`', "'", '"']
     bash_var = ''.join(['_' if c in invalid_chars else c for c in string])
-    bash_var = ''.join([c if c.isalnum() or c == '_' else '' for c in bash_var])
+    bash_var = ''.join([
+        c if c == '_' or (c.isascii() and c.isalnum()) else ''
+        for c in bash_var
+    ])
     if not bash_var:
         return "_"
     if bash_var[0].isdigit():
@@ -685,6 +691,11 @@ def utf7_encode(text, segment_size=None):
     :param segment_size: 每次编码的字符数，默认 None 表示随机分段
     :return: UTF-7 编码后的字符串
     """
+    if segment_size is not None and (
+        not isinstance(segment_size, int) or isinstance(segment_size, bool) or segment_size <= 0
+    ):
+        raise ValueError("segment_size must be a positive integer or None")
+
     encoded_segments = []  # 存储最终的分段.
     length = len(text)
     i = 0  # 当前字符位置
@@ -693,11 +704,10 @@ def utf7_encode(text, segment_size=None):
 
     while i < length:
         # 如果启用随机分段，生成一个随机分段大小
-        if segment_size is None:
-            segment_size = random.randint(1, 8)
+        current_segment_size = segment_size if segment_size is not None else random.randint(1, 8)
 
         # 确保分段大小不超过剩余字符数
-        segment = text[i:i + segment_size]
+        segment = text[i:i + current_segment_size]
 
         # 1. 将该分段的字符转换为 UTF-16BE
         utf16_bytes = segment.encode("utf-16be")
@@ -709,7 +719,7 @@ def utf7_encode(text, segment_size=None):
         encoded_segments.append(f"+{b64_encoded}-")
 
         # 更新位置
-        i += segment_size
+        i += current_segment_size
 
     return "".join(encoded_segments)
 

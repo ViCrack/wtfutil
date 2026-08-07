@@ -6,6 +6,16 @@
 from wtfutil.sqlutil import MYSQL, SQLite, next_id
 ```
 
+## Default transaction behavior
+
+The module commits automatically by default, so normal calls do not require an explicit `commit()`:
+
+- Every public `SQLite` database operation commits on success and rolls back on failure.
+- `MYSQL(...)` defaults to `autocommit=True`; successful `insert()`, `insert_or_replace()`, `insert_many()`, `update()`, `delete()`, and `execute()` calls commit automatically and failures roll back automatically.
+- `ScriptRunner(...)` defaults to `autocommit=True`; it commits after the complete script succeeds and rolls back when execution fails.
+
+Pass `autocommit=False` only when several MySQL operations must share one caller-managed transaction, then call `commit()` or `rollback()` explicitly.
+
 ## Examples
 
 ### SQLite: schema and CRUD
@@ -48,6 +58,7 @@ db.get("SELECT * FROM items WHERE id = ?", item_id)
 ### MySQL (same API)
 
 ```python
+# autocommit=True by default; successful writes need no explicit commit().
 db = MYSQL(host="127.0.0.1", user="root", password="pass", database="mydb")
 db.insert_or_replace("items", {"id": "x1", "url": "https://d.com", "status": 0})
 
@@ -84,10 +95,19 @@ transactional_db.commit()
 | `execute`, `query`, `get` | Raw SQL |
 | `close` | Close connection |
 
-Each `SQLite` instance owns its own thread-local connections, and its public operations are serialized so `close()` waits for an active operation before closing worker-thread connections. `SQLite(":memory:")` uses an instance-specific shared-memory URI, so threads on the same instance see the same data. `insert_many` binds every row according to the first record's column order and raises `ValueError` when column sets differ. MySQL write failures roll back before re-raising. The module does not install logging handlers; applications control logging configuration.
+Each `SQLite` instance owns one connection. Its public operations are serialized, so worker threads can safely share that connection and `close()` waits for an active operation to finish. `SQLite(":memory:")` therefore exposes the same in-memory data to every thread using that instance without retaining one connection per historical worker thread. `insert_many` binds every row according to the first record's column order, returns the number of inserted rows, and raises `ValueError` when column sets differ. Dictionary filters map `None` to SQL `IS NULL`. MySQL write failures roll back before re-raising. The module does not install logging handlers; applications control logging configuration.
 
 `MYSQL(..., autocommit=True)` is the default and prevents read-only calls from retaining implicit transactions. Set it to `False` to manage transaction boundaries yourself with `commit()` and `rollback()`.
 
-`ScriptRunner(..., autocommit=True)` commits the completed script and rolls back on failure; `autocommit=False` leaves transaction ownership to the caller. Each statement cursor is closed immediately after execution.
+`ScriptRunner(..., autocommit=True)` commits the completed script and rolls back on failure; `autocommit=False` leaves transaction ownership to the caller. Multiple statements on one line and token-style `DELIMITER` directives such as `DELIMITER //` are supported. Delimiters inside quoted strings, quoted identifiers, line comments, and block comments do not split a statement. MySQL `--` comments follow the server rule that requires following whitespace, while MySQL/MariaDB executable version comments (`/*!...*/` / `/*M!...*/`) are preserved and executed. Custom terminators are normalized to `;` before execution. Each statement cursor is closed immediately after execution.
+
+## SQL helper functions
+
+| Symbol | Purpose |
+|--------|---------|
+| `next_id(timestamp=None)` | Build a timestamp-and-UUID identifier |
+| `join_field_value(mapping, glue=", ")` | Build backtick-quoted `field = ?` assignments |
+| `join_field(mapping, glue=", ")` | Build a backtick-quoted field list |
+| `join_value(mapping, glue=", ")` | Build a placeholder list with one `?` per value |
 
 See source docstrings for placeholders and return types.

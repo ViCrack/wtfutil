@@ -34,6 +34,38 @@ class TestBaiduTranslateApi(unittest.TestCase):
         )
         response.raise_for_status.assert_called_once_with()
 
+    def test_request_uses_configured_timeout_and_expected_signature(self) -> None:
+        response = mock.Mock()
+        response.json.return_value = {"trans_result": [{"dst": "hello"}]}
+        session = mock.Mock()
+        session.post.return_value = response
+        client = BaiduTranslateApi(
+            "appid",
+            "appkey",
+            from_lang="auto",
+            to_lang="en",
+            timeout=12,
+            session=session,
+        )
+
+        with mock.patch("wtfutil.translateutil.random.randint", return_value=32768):
+            translated_text = _call_translate_without_rate_limit(client, "你好")
+
+        self.assertEqual(translated_text, "hello")
+        request_kwargs = session.post.call_args.kwargs
+        self.assertEqual(request_kwargs["timeout"], 12)
+        self.assertEqual(
+            request_kwargs["data"],
+            {
+                "appid": "appid",
+                "q": "你好",
+                "from": "auto",
+                "to": "en",
+                "salt": 32768,
+                "sign": "6db7e85c14a86ee99d2099af67b8312e",
+            },
+        )
+
     def test_api_error_uses_domain_exception(self) -> None:
         response = mock.Mock()
         response.json.return_value = {

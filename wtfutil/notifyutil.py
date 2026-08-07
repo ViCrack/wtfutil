@@ -322,8 +322,13 @@ def go_cqhttp(title: str, content: str) -> None:
         raise ValueError("go-cqhttp 服务的 GOBOT_URL 或 GOBOT_QQ 未设置!!")
     logger.debug("go-cqhttp 服务启动")
 
-    url = f'{push_config.get("GOBOT_URL")}?access_token={push_config.get("GOBOT_TOKEN")}&{push_config.get("GOBOT_QQ")}&message=标题:{title}\n内容:{content}'
-    response = _get_req().get(url).json()
+    recipient_parameters = dict(urllib.parse.parse_qsl(str(push_config.get("GOBOT_QQ")), keep_blank_values=True))
+    request_parameters = {
+        "access_token": push_config.get("GOBOT_TOKEN"),
+        **recipient_parameters,
+        "message": f"标题:{title}\n内容:{content}",
+    }
+    response = _get_req().get(push_config.get("GOBOT_URL"), params=request_parameters).json()
 
     if response["status"] == "ok":
         logger.debug("go-cqhttp 推送成功！")
@@ -449,7 +454,7 @@ def pushplus_bot(title: str, content: str) -> None:
         raise ValueError("PUSHPLUS 服务的 PUSH_PLUS_TOKEN 未设置!!")
     logger.debug("PUSHPLUS 服务启动")
 
-    url = "http://www.pushplus.plus/send"
+    url = "https://www.pushplus.plus/send"
     data = {
         "token": push_config.get("PUSH_PLUS_TOKEN"),
         "title": title,
@@ -464,7 +469,7 @@ def pushplus_bot(title: str, content: str) -> None:
         logger.debug("PUSHPLUS 推送成功！")
 
     else:
-        url_old = "http://pushplus.hxtrip.com/send"
+        url_old = "https://pushplus.hxtrip.com/send"
         headers["Accept"] = "application/json"
         response = _get_req().post(url=url_old, data=body, headers=headers).json()
 
@@ -505,7 +510,7 @@ def wecom_app(title: str, content: str) -> None:
         QYWX_AM_AY = push_config.get("QYWX_AM")
     else:
         QYWX_AM_AY = re.split(",", push_config.get("QYWX_AM"))
-    if 4 < len(QYWX_AM_AY) > 5:
+    if len(QYWX_AM_AY) not in {4, 5}:
         logger.error("QYWX_AM 设置错误!!")
         raise ValueError("QYWX_AM 设置错误!!")
     logger.debug("企业微信 APP 服务启动")
@@ -643,18 +648,12 @@ def telegram_bot(title: str, content: str) -> None:
     }
     proxies = None
     if push_config.get("TG_PROXY_HOST") and push_config.get("TG_PROXY_PORT"):
-        if push_config.get("TG_PROXY_AUTH") is not None and "@" not in push_config.get(
-                "TG_PROXY_HOST"
-        ):
-            push_config["TG_PROXY_HOST"] = (
-                    push_config.get("TG_PROXY_AUTH")
-                    + "@"
-                    + push_config.get("TG_PROXY_HOST")
-            )
-        proxyStr = "http://{}:{}".format(
-            push_config.get("TG_PROXY_HOST"), push_config.get("TG_PROXY_PORT")
-        )
-        proxies = {"http": proxyStr, "https": proxyStr}
+        proxy_host = str(push_config.get("TG_PROXY_HOST"))
+        proxy_auth = str(push_config.get("TG_PROXY_AUTH") or "")
+        if proxy_auth and "@" not in proxy_host:
+            proxy_host = f"{proxy_auth}@{proxy_host}"
+        proxy_url = f"http://{proxy_host}:{push_config.get('TG_PROXY_PORT')}"
+        proxies = {"http": proxy_url, "https": proxy_url}
     response = _get_req().post(
         url=url, headers=headers, params=payload, proxies=proxies
     ).json()
@@ -825,7 +824,7 @@ def aiops_phone(title: str, content: str) -> None:
         raise ValueError("aiops 服务的 AIOPS_KEY 未设置!!")
     logger.debug("aiops 服务启动")
     import uuid
-    response = _get_req().post("http://api.aiops.com/alert/api/event", json={
+    response = _get_req().post("https://api.aiops.com/alert/api/event", json={
         "app": push_config.get("AIOPS_KEY"),
         "eventId": uuid.uuid4().hex,
         "eventType": "trigger",
@@ -1142,6 +1141,9 @@ def send(title: str, content: str) -> None:
     if hitokoto:
         try:
             text = one()
+        except Exception:
+            logger.warning("一言服务调用失败，继续发送原始通知", exc_info=True)
+            text = ""
         finally:
             _close_thread_request_session()
     else:

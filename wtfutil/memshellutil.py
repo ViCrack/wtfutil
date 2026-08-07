@@ -79,6 +79,7 @@ JRE_RELEASE_TO_CLASS = {
     19: 63,
     20: 64,
     21: 65,
+    22: 66,
 }
 
 # 官方常见写法（来自 party.mem.mk /api/config）；用于忽略大小写归一。
@@ -179,14 +180,18 @@ def resolve_jre_class_version(value: int | str) -> int:
     """
     将「JRE 发行版本」或「class 主版本」统一为官方 API 所需的 class 主版本。
 
-    - ``6`` / ``8`` / ``9`` / ``11`` / ``17`` / ``21`` 等 → 映射为 50/52/53/…
+    - ``6`` / ``8`` / ``9`` / ``11`` / ``17`` / ``21`` / ``22`` 等 → 映射为 50/52/53/…
     - 已是 class 主版本（如 ``50``、``61``）则原样返回
     """
     try:
         v = int(value)
     except (TypeError, ValueError) as exc:
         raise ValueError(f"invalid jre / target_jre_version: {value!r}") from exc
-    return JRE_RELEASE_TO_CLASS.get(v, v)
+    if v in JRE_RELEASE_TO_CLASS:
+        return JRE_RELEASE_TO_CLASS[v]
+    if 1 <= v < 45:
+        return v + 44
+    return v
 
 
 def canonicalize_server(value: str) -> str:
@@ -329,7 +334,7 @@ def build_generate_body(
     kwargs 对应官方 JSON：serverVersion、shellTool、targetJreVersion、behinderPass 等。
     ``server`` / ``shell_tool`` / ``shell_type`` 在已知集合内**不区分大小写**
     （如 ``tomcat`` → ``Tomcat``）；未知名称原样上传。
-    目标字节码版本请优先传 ``jre``（Java 发行版：6/8/9/11/17/21）；
+    目标字节码版本请优先传 ``jre``（Java 发行版：6/8/9/11/17/21/22）；
     ``target_jre_version`` 仍可用（发行版或 class 主版本均可，见 :func:`resolve_jre_class_version`）。
     二者同时传入时以 ``jre`` 为准。默认 JRE 6。
     也可传通用 ``password`` / ``key``，按**最终** shellTool 自动映射（见 :func:`resolve_shell_credentials`）；
@@ -354,6 +359,9 @@ def build_generate_body(
         by_pass_java_module = class_ver >= JRE_RELEASE_TO_CLASS[9]
 
     # 专用凭证先写入；通用 password/key 等 merge + 最终 shellTool 确定后再映射
+    if body is not None and not isinstance(body, dict):
+        raise TypeError("body must be a dictionary or None")
+
     built = {
         "shellConfig": {
             **_DEFAULT_SHELL_CONFIG,
@@ -395,11 +403,18 @@ def build_generate_body(
         built = _deep_merge(built, body)
 
     sc = built.get("shellConfig")
-    if isinstance(sc, dict):
-        _canonicalize_shell_config(sc)
+    if not isinstance(sc, dict):
+        raise TypeError("body.shellConfig must be an object")
+    _canonicalize_shell_config(sc)
 
-    stc = built.setdefault("shellToolConfig", {})
-    final_tool = (sc or {}).get("shellTool") or shell_tool
+    stc = built.get("shellToolConfig")
+    if not isinstance(stc, dict):
+        raise TypeError("body.shellToolConfig must be an object")
+    injector_config = built.get("injectorConfig")
+    if not isinstance(injector_config, dict):
+        raise TypeError("body.injectorConfig must be an object")
+
+    final_tool = sc.get("shellTool") or shell_tool
     creds = resolve_shell_credentials(
         final_tool,
         password=password,
@@ -429,8 +444,14 @@ def extract_generate_meta(result: dict, *, output: str | None = None) -> dict:
 
     供 CLI ``-o`` 模式向 stdout 打印，便于 AI/脚本解析。
     """
-    mem = result.get("memShellResult") or {}
-    injector_cfg = mem.get("injectorConfig") or {}
+    if not isinstance(result, dict):
+        raise TypeError("result must be a dictionary")
+    mem = result.get("memShellResult", {})
+    if not isinstance(mem, dict):
+        raise TypeError("result.memShellResult must be an object")
+    injector_cfg = mem.get("injectorConfig", {})
+    if not isinstance(injector_cfg, dict):
+        raise TypeError("result.memShellResult.injectorConfig must be an object")
     meta: dict[str, Any] = {
         "shellClassName": mem.get("shellClassName"),
         "injectorClassName": mem.get("injectorClassName"),

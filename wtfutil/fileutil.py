@@ -74,6 +74,8 @@ def read_text(
     'xmlcharrefreplace'：使用 XML 实体替代无法解码的字符。例如，b'\xe4\xb8\x96\xe7\x95\x8c'.decode('ascii', errors='xmlcharrefreplace') 输出 '&#19990;&#30028;'。
     'surrogateescape'：将无法解码的字节转换为 Unicode 代理区转义码。例如，b'\\xe9'.decode('utf-8', errors='surrogateescape') 输出 '\\udce9'。
     """
+    if not isinstance(mode, str) or "r" not in mode or any(flag in mode for flag in "wax+"):
+        raise ValueError("read_text mode must be a read-only mode such as 'r' or 'rb'")
     if isinstance(filepath, Path):
         filepath = str(filepath)
     binary_mode = "b" in mode
@@ -206,7 +208,10 @@ class JarAnalyzer:
     }
 
     SPRING_BOOT_INDICATORS = ["org.springframework.", "Spring-Boot", "BOOT-INF/"]
-    GUI_INDICATORS = ["java/awt/", "javax/swing/", "javafx/application/"]
+    GUI_INDICATORS = [
+        "java/awt/", "javax/swing/", "javafx/application/",
+        "java.awt.", "javax.swing.", "javafx.application.",
+    ]
 
     def __init__(self, jar_path: str):
         self.jar_path = Path(jar_path).resolve()
@@ -221,7 +226,7 @@ class JarAnalyzer:
         # 检查文件是否存在，不存在则抛出异常
         if not self.jar_path.exists():
             raise FileNotFoundError(f"JAR 文件不存在: {self.jar_path}")
-        if not self.jar_path.is_file() or not self.jar_path.suffix == ".jar":
+        if not self.jar_path.is_file() or self.jar_path.suffix.lower() != ".jar":
             raise ValueError(f"路径不是有效的 JAR 文件: {self.jar_path}")
 
         # 初始化时直接进行分析
@@ -235,7 +240,9 @@ class JarAnalyzer:
             try:
                 with zipfile.ZipFile(self.jar_path, 'r') as jar:
                     with jar.open("META-INF/MANIFEST.MF") as manifest:
-                        self._manifest_content = manifest.read().decode("utf-8")
+                        raw_manifest_content = manifest.read().decode("utf-8")
+                        # Manifest continuation lines begin with one space and belong to the previous field.
+                        self._manifest_content = raw_manifest_content.replace("\r\n", "\n").replace("\n ", "")
                         # 检查是否有 Main-Class 或 Start-Class（Spring Boot）
                         lines = self._manifest_content.splitlines()
                         for line in lines:
@@ -284,14 +291,14 @@ class JarAnalyzer:
                         with jar.open(spring_boot_main_class_path) as class_file:
                             class_file.read(4)  # 跳过魔数
                             _, major_version = struct.unpack(">HH", class_file.read(4))
-                            self.jdk_version = self.JAVA_VERSION_MAP.get(major_version, 0)
+                            self.jdk_version = self._java_release_from_major(major_version)
                             return
                     # 再检查标准路径
                     elif main_class_path in class_files:
                         with jar.open(main_class_path) as class_file:
                             class_file.read(4)  # 跳过魔数
                             _, major_version = struct.unpack(">HH", class_file.read(4))
-                            self.jdk_version = self.JAVA_VERSION_MAP.get(major_version, 0)
+                            self.jdk_version = self._java_release_from_major(major_version)
                             return
 
                 # 检查第一个 .class 文件
@@ -300,13 +307,20 @@ class JarAnalyzer:
                     with jar.open(file) as class_file:
                         class_file.read(4)  # 跳过魔数
                         _, major_version = struct.unpack(">HH", class_file.read(4))
-                        versions.add(self.JAVA_VERSION_MAP.get(major_version, 0))
+                        versions.add(self._java_release_from_major(major_version))
                     if len(versions) > 1:
                         self.jdk_version = max(versions)  # 使用最高版本
                         return
                 self.jdk_version = versions.pop() if versions else 0
         except Exception:
             self.jdk_version = 0
+
+    @classmethod
+    def _java_release_from_major(cls, major_version: int) -> int:
+        """将 class major 映射为 Java release，并兼容 Java 22 及后续版本。"""
+        if major_version in cls.JAVA_VERSION_MAP:
+            return cls.JAVA_VERSION_MAP[major_version]
+        return major_version - 44 if major_version >= 45 else 0
 
     def _check_spring_boot(self) -> None:
         """增强 Spring Boot 判断，结合 MANIFEST.MF 和文件结构"""

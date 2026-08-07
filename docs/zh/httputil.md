@@ -26,7 +26,7 @@ from wtfutil.httputil import httpraw, requests_session
 | `base_url` 非空 | `BaseUrlSession` |
 | 其它 | `RequestsSession` |
 
-无论哪种：TLS 证书默认不校验（`verify=False`），HTTPS 使用 `CustomSslContextHttpAdapter` 兼容旧式服务端连接。调用方仍可传 `verify=True` 或 CA bundle 路径恢复校验。
+无论哪种：TLS 证书默认不校验（`verify=False`），HTTPS 使用 `CustomSslContextHttpAdapter` 兼容旧式服务端连接；该兼容上下文同时用于直连和经过代理的 HTTPS 连接。调用方仍可传 `verify=True` 或 CA bundle 路径恢复校验。
 
 ### 函数签名
 
@@ -64,6 +64,8 @@ def requests_session(
 | `max_retries` | urllib3 默认 | 可传 `urllib3.Retry`。 |
 | `pool_connections` / `pool_maxsize` | 10 | 连接池大小。 |
 | `verify` | `False` | `False` 不校验证书；`True` 显式开启；字符串可指定 CA bundle 路径。 |
+
+`use_cache` 不能与 `base_url`、`debug` 或 `rate_limit` 组合；这些组合会抛出 `ValueError`，避免静默忽略增强参数。显式传入固定 `user_agent` 时不会初始化随机 UA 提供器。
 
 ### 与 requests.Session 的配合
 
@@ -133,6 +135,7 @@ response = session.get("/users")
 - 头部 `Key: Value`；必须含 `Host`；会重算 body 的 `Content-Length`
 - `ssl=True` 表示 `https://`
 - `**kwargs` 传给 `session.request`
+- 所有 HTTP 方法的 body 都会保留；仅 `application/json` 或 `+json` 媒体类型会解析后通过 `json=` 发送，其它正文保持原始文本
 
 ```python
 from wtfutil.httputil import httpraw
@@ -158,6 +161,6 @@ resp = httpraw(raw, ssl=True, timeout=10)
 | `is_internal_url` | URL 是否内网 |
 | `is_wildcard_dns` / `is_wildcard_dns_batch` | 泛解析检测 |
 | `get_maindomain` | 注册域名（`tldextract`） |
-| `url2ip` | 主机名解析 |
+| `url2ip` | 解析 URL 或裸主机名；可选返回显式或默认端口 |
 | `is_port_in_use` | 本机端口监听 |
-| `get_base_url` / `build_absolute_url` | URL 拼接 |
+| `get_base_url` / `build_absolute_url` | 校验/提取 HTTP(S) base URL，并解析相对 URL 组件 |

@@ -40,7 +40,9 @@ WEBHOOK_BODY =
 
 ## send(title, content)
 
-Concurrent push to all configured channels. Each worker thread owns and closes its HTTP session, so mutable Requests state is not shared across channels. A channel failure is logged without preventing the remaining channels from completing. Empty content is logged as error. Optional Hitokoto via `HITOKOTO`; `SKIP_PUSH_TITLE` to skip title.
+Concurrent push to all configured channels. Each worker thread owns and closes its HTTP session, so mutable Requests state is not shared across channels. A channel failure is logged without preventing the remaining channels from completing. Empty content is logged as error. Optional Hitokoto via `HITOKOTO`; a Hitokoto failure is logged and the original notification is still sent. Use `SKIP_PUSH_TITLE` to skip a title.
+
+Hard-coded public PushPlus and AIOps endpoints use HTTPS only and never fall back to plaintext HTTP. User-configured loopback services and HTTP proxy URLs remain supported.
 
 ```python
 from wtfutil.notifyutil import send

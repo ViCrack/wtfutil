@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 import ssl
+import subprocess
+import sys
 import unittest
+from pathlib import Path
 from types import SimpleNamespace
 from unittest import mock
 
@@ -14,6 +17,28 @@ from wtfutil import httputil
 
 
 class TestRequestsSession(unittest.TestCase):
+    def test_import_tls_side_effect_is_verified_in_isolated_process(self) -> None:
+        project_directory = Path(__file__).resolve().parents[1]
+        script = (
+            "import ssl; "
+            "import wtfutil.httputil; "
+            "assert ssl._create_default_https_context is ssl._create_unverified_context"
+        )
+        completed_process = subprocess.run(
+            [sys.executable, "-c", script],
+            cwd=project_directory,
+            capture_output=True,
+            text=True,
+            timeout=30,
+            check=False,
+        )
+
+        self.assertEqual(
+            completed_process.returncode,
+            0,
+            completed_process.stderr,
+        )
+
     def test_import_disables_global_tls_verification(self) -> None:
         self.assertIs(
             ssl._create_default_https_context,
@@ -62,6 +87,47 @@ class TestRequestsSession(unittest.TestCase):
                 pool_class.ConnectionCls.__mro__[1],
                 httputil._ChunkedConnectionMixin,
             )
+
+    def test_fixed_user_agent_does_not_initialize_generator(self) -> None:
+        with (
+            mock.patch.object(httputil, "UserAgent") as user_agent_factory,
+            httputil.requests_session(user_agent="fixed-agent") as session,
+        ):
+            self.assertEqual(session.headers["User-Agent"], "fixed-agent")
+
+        user_agent_factory.assert_not_called()
+
+    def test_cache_rejects_enhancements_it_cannot_apply(self) -> None:
+        incompatible_options = (
+            {"base_url": "https://example.test"},
+            {"debug": True},
+            {"rate_limit": 1},
+        )
+        for incompatible_option in incompatible_options:
+            with self.subTest(incompatible_option=incompatible_option), self.assertRaises(ValueError):
+                httputil.requests_session(
+                    use_cache=True,
+                    user_agent="test-agent",
+                    **incompatible_option,
+                )
+
+    def test_proxy_manager_receives_legacy_tls_context(self) -> None:
+        adapter = httputil.CustomSslContextHttpAdapter()
+        with mock.patch.object(
+            httputil.HTTPAdapter,
+            "proxy_manager_for",
+            return_value=mock.sentinel.proxy_manager,
+        ) as parent_proxy_manager:
+            result = adapter.proxy_manager_for("http://127.0.0.1:8080")
+
+        self.assertIs(result, mock.sentinel.proxy_manager)
+        ssl_context = parent_proxy_manager.call_args.kwargs["ssl_context"]
+        self.assertIsInstance(ssl_context, ssl.SSLContext)
+        self.assertFalse(ssl_context.check_hostname)
+        self.assertTrue(
+            ssl_context.options
+            & getattr(ssl, "OP_LEGACY_SERVER_CONNECT", 0x4)
+        )
 
 
 class TestChunkedAdapter(unittest.TestCase):
@@ -146,9 +212,8 @@ class TestChunkedAdapter(unittest.TestCase):
             requests.adapters.HTTPAdapter,
             "send",
             side_effect=requests.RequestException("boom"),
-        ):
-            with self.assertRaises(requests.RequestException):
-                adapter.send(request)
+        ), self.assertRaises(requests.RequestException):
+            adapter.send(request)
 
         self.assertFalse(hasattr(httputil._http_context, "chunked_config"))
 
@@ -180,6 +245,67 @@ class TestHttpRaw(unittest.TestCase):
 
     def test_internal_url_supports_ipv6(self) -> None:
         self.assertTrue(httputil.is_internal_url("http://[::1]/status"))
+
+    def test_text_body_that_looks_like_json_remains_text(self) -> None:
+        session = mock.MagicMock()
+        session.request.return_value = requests.Response()
+        session_context = mock.MagicMock()
+        session_context.__enter__.return_value = session
+        raw_request = (
+            "POST /api HTTP/1.1\r\n"
+            "Host: example.test\r\n"
+            "Content-Type: text/plain\r\n\r\n"
+            "123"
+        )
+
+        with mock.patch.object(httputil, "requests_session", return_value=session_context):
+            httputil.httpraw(raw_request)
+
+        request_kwargs = session.request.call_args.kwargs
+        self.assertEqual(request_kwargs["data"], "123")
+        self.assertIsNone(request_kwargs["json"])
+
+    def test_delete_body_is_preserved(self) -> None:
+        session = mock.MagicMock()
+        session.request.return_value = requests.Response()
+        session_context = mock.MagicMock()
+        session_context.__enter__.return_value = session
+        raw_request = "DELETE /item HTTP/1.1\r\nHost: example.test\r\n\r\npayload"
+
+        with mock.patch.object(httputil, "requests_session", return_value=session_context):
+            httputil.httpraw(raw_request)
+
+        self.assertEqual(session.request.call_args.kwargs["data"], "payload")
+
+
+class TestUrlHelpers(unittest.TestCase):
+    def test_url2ip_accepts_bare_hostname_and_explicit_port(self) -> None:
+        with mock.patch.object(httputil, "gethostbyname", return_value="203.0.113.10") as resolver:
+            self.assertEqual(httputil.url2ip("example.com"), "203.0.113.10")
+            self.assertEqual(
+                httputil.url2ip("example.com:8080", with_port=True),
+                ("203.0.113.10", 8080),
+            )
+
+        self.assertEqual(resolver.call_args_list, [mock.call("example.com"), mock.call("example.com")])
+
+    def test_get_base_url_rejects_text_without_scheme_and_host(self) -> None:
+        self.assertIsNone(httputil.get_base_url("not a url"))
+        self.assertEqual(
+            httputil.get_base_url("https://example.test/path?q=1#fragment"),
+            "https://example.test",
+        )
+
+    def test_query_and_fragment_references_replace_existing_components(self) -> None:
+        base_url = "https://example.test/path?old=1#old"
+        self.assertEqual(
+            httputil.build_absolute_url(base_url, "?new=2"),
+            "https://example.test/path?new=2",
+        )
+        self.assertEqual(
+            httputil.build_absolute_url(base_url, "#new"),
+            "https://example.test/path?old=1#new",
+        )
 
 
 if __name__ == "__main__":

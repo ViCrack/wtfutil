@@ -18,7 +18,9 @@ The legacy helpers remain available for explicit opt-in compatibility and affect
 
 ## requests_session()
 
-Factory returning a pre-configured session (`CachedSession`, `BaseUrlSession`, or `RequestsSession`) with TLS verification disabled by default, retry adapters, and `CustomSslContextHttpAdapter` on HTTPS. Pass `verify=True` or a CA bundle path to opt into verification.
+Factory returning a pre-configured session (`CachedSession`, `BaseUrlSession`, or `RequestsSession`) with TLS verification disabled by default, retry adapters, and `CustomSslContextHttpAdapter` on HTTPS. The adapter applies its legacy-server TLS context to both direct and proxied HTTPS connections. Pass `verify=True` or a CA bundle path to opt into verification.
+
+`use_cache` cannot be combined with `base_url`, `debug`, or `rate_limit`; these combinations raise `ValueError` rather than silently ignoring enhancements. Providing a fixed `user_agent` does not initialize the random user-agent provider.
 
 ```python
 def requests_session(
@@ -81,7 +83,7 @@ def log_url(prepared, kwargs):
 
 ## httpraw(raw, ssl=False, **kwargs)
 
-Send a raw HTTP packet as text. First line `METHOD PATH HTTP/1.x`; headers `Key: Value`; must include `Host`.
+Send a raw HTTP packet as text. First line `METHOD PATH HTTP/1.x`; headers `Key: Value`; must include `Host`. Bodies are preserved for all HTTP methods. Only JSON media types (`application/json` or `+json`) are parsed and sent through the `json=` argument; other bodies remain raw text.
 
 ```python
 from wtfutil.httputil import httpraw
@@ -105,6 +107,6 @@ resp = httpraw(raw, ssl=True, timeout=10)
 | `is_internal_url` | Internal IP check for URL |
 | `is_wildcard_dns` / `is_wildcard_dns_batch` | Wildcard DNS |
 | `get_maindomain` | Registered domain (`tldextract`) |
-| `url2ip` | Resolve host |
+| `url2ip` | Resolve a URL or bare hostname; optionally return the explicit/default port |
 | `is_port_in_use` | Local port listening |
-| `get_base_url` / `build_absolute_url` | URL helpers |
+| `get_base_url` / `build_absolute_url` | Validate/extract an HTTP(S) base URL and resolve relative URL components |

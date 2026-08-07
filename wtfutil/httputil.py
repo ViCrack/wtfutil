@@ -283,6 +283,11 @@ class CustomSslContextHttpAdapter(HTTPAdapter):
             **pool_kwargs,
         )
 
+    def proxy_manager_for(self, *args, **kwargs):
+        """Apply the same legacy TLS context to proxied HTTPS connections."""
+        kwargs["ssl_context"] = _create_legacy_ssl_context()
+        return super().proxy_manager_for(*args, **kwargs)
+
 
 @dataclass
 class ChunkedConfig:
@@ -680,6 +685,11 @@ def requests_session(
     Raises:
         TypeError: 如果 proxies 类型无效。
     """
+    if use_cache and (base_url is not None or debug or rate_limit is not None):
+        raise ValueError(
+            "use_cache cannot be combined with base_url, debug, or rate_limit"
+        )
+
     if use_cache:
         from requests_cache import CachedSession
 
@@ -694,13 +704,15 @@ def requests_session(
 
     session.get_redirect_target = get_redirect_target.__get__(session, type(session))
 
-    ua = UserAgent()
+    resolved_user_agent = user_agent
+    if resolved_user_agent is None:
+        resolved_user_agent = UserAgent().random
     session.headers.update(
         {
             'Upgrade-Insecure-Requests': '1',
             'Pragma': 'no-cache',
             'Cache-Control': 'no-cache',
-            'User-Agent': user_agent or ua.random,
+            'User-Agent': resolved_user_agent,
         }
     )
     if fake_ip:
@@ -831,10 +843,15 @@ def httpraw(raw: str, ssl: bool = False, **kwargs: Any) -> requests.Response:
     )
     post_data = None
     json_data = None
-    if method.upper() in {"POST", "PUT", "PATCH"} and separator:
-        try:
-            json_data = json.loads(request_body)
-        except ValueError:
+    if separator:
+        content_type = request_headers.get("Content-Type", "").split(";", 1)[0].strip().lower()
+        content_type_is_json = content_type == "application/json" or content_type.endswith("+json")
+        if content_type_is_json:
+            try:
+                json_data = json.loads(request_body)
+            except ValueError:
+                post_data = request_body
+        else:
             post_data = request_body
 
     netloc = "http" if not ssl else "https"
@@ -959,13 +976,18 @@ def url2ip(url: str, with_port: bool = False) -> str | Tuple[str, int]:
     works like turning 'http://baidu.com' => '180.149.132.47'
     """
 
-    url_prased = urlparse(url)
-    if url_prased.port:
-        ret = gethostbyname(url_prased.hostname), url_prased.port
-    elif not url_prased.port and url_prased.scheme == 'https':
-        ret = gethostbyname(url_prased.hostname), 443
-    else:
-        ret = gethostbyname(url_prased.hostname), 80
+    if not isinstance(url, str) or not url.strip():
+        raise ValueError("url must be a non-empty string")
+
+    parsed_url = urlparse(url if "://" in url else f"//{url}")
+    hostname = parsed_url.hostname
+    if hostname is None:
+        raise ValueError(f"Unable to determine hostname from URL: {url}")
+
+    port = parsed_url.port
+    if port is None:
+        port = 443 if parsed_url.scheme.lower() == "https" else 80
+    ret = gethostbyname(hostname), port
 
     return ret if with_port else ret[0]
 
@@ -996,6 +1018,8 @@ def get_base_url(url: str) -> Optional[str]:
     try:
         # 解析 URL，分解为协议、域名、路径等部分
         parsed = urlparse(url)
+        if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+            return None
         # 移除路径、查询参数和片段，仅保留协议和域名部分，然后重新生成 URL
         base_url = parsed._replace(path="", query="", fragment="").geturl()
         return base_url
@@ -1036,11 +1060,13 @@ def build_absolute_url(base_url: str, relative_url: str) -> str:
 
     # 如果是query参数（?开头）
     elif relative_url.startswith("?"):
-        return base_url + relative_url
+        parsed = urlparse(base_url)
+        return parsed._replace(query=relative_url[1:], fragment="").geturl()
 
     # 如果是anchor（#开头）
     elif relative_url.startswith("#"):
-        return base_url + relative_url
+        parsed = urlparse(base_url)
+        return parsed._replace(fragment=relative_url[1:]).geturl()
 
     # 如果是相对路径（其他情况）
     else:

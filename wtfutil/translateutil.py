@@ -30,6 +30,7 @@ class BaiduTranslateApi:
         self.appkey = appkey
         self.from_lang = from_lang
         self.to_lang = to_lang
+        self.timeout = timeout
         self.req = session or requests_session(timeout=timeout)
         self._owns_session = session is None
 
@@ -58,6 +59,7 @@ class BaiduTranslateApi:
         response = self.req.post(
             "https://api.fanyi.baidu.com/api/trans/vip/translate",
             data=data,
+            timeout=self.timeout,
         )
         response.raise_for_status()
         try:

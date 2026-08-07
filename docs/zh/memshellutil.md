@@ -111,6 +111,8 @@ with MemShellParty() as client:
 
 `generate(**kwargs)` 使用 **snake_case**，SDK 会组装成官方 camelCase JSON。也可传入完整 `body=` 字典；与 kwargs 同时存在时，**body 深度合并覆盖** kwargs 结果。
 
+`body` 必须是 JSON 对象；其中的 `shellConfig`、`shellToolConfig` 和 `injectorConfig` 也必须是对象。嵌套类型错误会在发送生成请求前直接抛出 `TypeError`。`extract_generate_meta()` 也会对响应中的对应字段执行相同的对象类型校验。
+
 **大小写**：`server` / `shell_tool` / `shell_type` 在已知官方名称内**不区分大小写**（`tomcat` → `Tomcat`，`GODZILLA` → `Godzilla`）。未知名称原样上传。已知表可能滞后于上游，可用 `get_config()` / `memshell config` 核对。
 
 ### 内置默认（对齐官方常用 UI）
@@ -120,7 +122,7 @@ with MemShellParty() as client:
 | 中间件 `server` | `Tomcat` |
 | 工具 `shell_tool` | **`Behinder`（冰蝎）** |
 | 挂载 `shell_type` | `Listener` |
-| 目标运行时 `jre` | `6`（Java 6；常用另有 8 / 9 / 11 / 17 / 21） |
+| 目标运行时 `jre` | `6`（Java 6；常用另有 8 / 9 / 11 / 17 / 21 / 22） |
 | `server_version` | `"unknown"`（多数场景不用改） |
 | 缩小字节码 `shrink` | `True` |
 | 静态初始化 `static_initialize` | `True` |
@@ -165,7 +167,7 @@ client.generate(shell_tool="Behinder", password="ignored", behinder_pass="real")
 | `server_version` | shellConfig.serverVersion | 服务版本；少数挂载因包名差异才需要 |
 | `shell_tool` | shellConfig.shellTool | Behinder / Godzilla / Command…（不区分大小写） |
 | `shell_type` | shellConfig.shellType | Listener / Filter / Valve…（不区分大小写） |
-| `jre` | shellConfig.targetJreVersion | **推荐**：Java/JRE 发行版本 `6` / `8` / `9` / `11` / `17` / `21` |
+| `jre` | shellConfig.targetJreVersion | **推荐**：Java/JRE 发行版本 `6` / `8` / `9` / `11` / `17` / `21` / `22`；后续发行版按标准 `release + 44` 映射 |
 | `target_jre_version` | 同上 | 高级兼容；可传发行版或官方 class 主版本；与 `jre` 同时出现时以 `jre` 为准。`body` 里的 `targetJreVersion` 按官方原样使用、不再换算 |
 | `debug` | shellConfig.debug | 注入器打印注入信息，Shell 打印异常堆栈 |
 | `by_pass_java_module` | shellConfig.byPassJavaModule | 绕过 JDK9+ 模块限制（Unsafe defineClass） |
@@ -339,7 +341,7 @@ memshell install-skill --project
 
 - **`-o PATH`**：文件只写 `packResult`；stdout 为 meta JSON。
 - **无 `-o`**：stdout 完整响应 JSON。
-- **`--jre`**：目标 Java 发行版本（6/8/9/11/17/21）。
+- **`--jre`**：目标 Java 发行版本（6/8/9/11/17/21/22，后续版本也按标准映射）。
 - **`--server` / `--shell-tool` / `--shell-type`**：已知名称内不区分大小写。
 - 日常用 `--password` / `--key` 即可；专用 `*-pass` 与 `--target-jre-version` 仍可用但不在 `--help` 中展示。
 

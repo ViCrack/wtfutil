@@ -53,38 +53,214 @@ def _serialize_sqlite_operation(function):
 
 class ScriptRunner:
     def __init__(self, connection: Any, delimiter: str = ";", autocommit: bool = True) -> None:
+        if not delimiter or any(character.isspace() for character in delimiter):
+            raise ValueError("delimiter must be a non-empty token without whitespace")
         self.connection = connection
         self.delimiter = delimiter
         self.autocommit = autocommit
 
+    @staticmethod
+    def _starts_mysql_line_comment(statement: str, character_index: int) -> bool:
+        """Return whether ``--`` begins a MySQL line comment at this position."""
+        if not statement.startswith("--", character_index):
+            return False
+        following_character_index = character_index + 2
+        if following_character_index >= len(statement):
+            return True
+        return ord(statement[following_character_index]) <= 32
+
+    @staticmethod
+    def _starts_executable_block_comment(
+        statement: str,
+        character_index: int,
+    ) -> bool:
+        """Recognize MySQL and MariaDB executable version comments."""
+        return statement.startswith("/*!", character_index) or statement.startswith(
+            "/*M!",
+            character_index,
+        )
+
+    @staticmethod
+    def _has_executable_content(statement: str) -> bool:
+        """Return whether a statement contains content other than comments."""
+        character_index = 0
+        parser_state = "normal"
+        while character_index < len(statement):
+            current_character = statement[character_index]
+            next_character = (
+                statement[character_index + 1]
+                if character_index + 1 < len(statement)
+                else ""
+            )
+
+            if parser_state == "normal":
+                if current_character.isspace():
+                    character_index += 1
+                    continue
+                if ScriptRunner._starts_mysql_line_comment(
+                    statement,
+                    character_index,
+                ):
+                    parser_state = "line_comment"
+                    character_index += 2
+                    continue
+                if current_character == "#":
+                    parser_state = "line_comment"
+                    character_index += 1
+                    continue
+                if current_character == "/" and next_character == "*":
+                    if ScriptRunner._starts_executable_block_comment(
+                        statement,
+                        character_index,
+                    ):
+                        return True
+                    parser_state = "block_comment"
+                    character_index += 2
+                    continue
+                return True
+
+            if parser_state == "line_comment":
+                if current_character in "\r\n":
+                    parser_state = "normal"
+                character_index += 1
+                continue
+
+            if current_character == "*" and next_character == "/":
+                parser_state = "normal"
+                character_index += 2
+            else:
+                character_index += 1
+
+        return False
+
+    def _iter_statements(self, sql: str):
+        """Yield terminated SQL statements without splitting literals or comments."""
+        current_delimiter = self.delimiter
+        statement_buffer: list[str] = []
+        parser_state = "normal"
+
+        for line in sql.splitlines(keepends=True):
+            buffered_statement = "".join(statement_buffer)
+            stripped_line = line.strip()
+            delimiter_parts = stripped_line.split(maxsplit=1)
+            is_delimiter_directive = (
+                parser_state == "normal"
+                and not self._has_executable_content(buffered_statement)
+                and delimiter_parts
+                and delimiter_parts[0].upper() == "DELIMITER"
+            )
+            if is_delimiter_directive:
+                if len(delimiter_parts) != 2:
+                    raise ValueError("DELIMITER must not be empty")
+                new_delimiter = delimiter_parts[1].strip()
+                if not new_delimiter or any(
+                    character.isspace() for character in new_delimiter
+                ):
+                    raise ValueError(
+                        "DELIMITER must be a non-empty token without whitespace"
+                    )
+                current_delimiter = new_delimiter
+                self.delimiter = new_delimiter
+                statement_buffer.clear()
+                continue
+
+            character_index = 0
+            while character_index < len(line):
+                current_character = line[character_index]
+                next_character = (
+                    line[character_index + 1]
+                    if character_index + 1 < len(line)
+                    else ""
+                )
+
+                if parser_state == "normal":
+                    if line.startswith(current_delimiter, character_index):
+                        statement = "".join(statement_buffer).rstrip()
+                        statement_buffer.clear()
+                        character_index += len(current_delimiter)
+                        if self._has_executable_content(statement):
+                            yield statement + ";"
+                        continue
+                    if current_character == "'":
+                        parser_state = "single_quote"
+                    elif current_character == '"':
+                        parser_state = "double_quote"
+                    elif current_character == "`":
+                        parser_state = "backtick_quote"
+                    elif self._starts_mysql_line_comment(line, character_index):
+                        parser_state = "line_comment"
+                        statement_buffer.extend((current_character, next_character))
+                        character_index += 2
+                        continue
+                    elif current_character == "#":
+                        parser_state = "line_comment"
+                    elif current_character == "/" and next_character == "*":
+                        parser_state = "block_comment"
+                        statement_buffer.extend((current_character, next_character))
+                        character_index += 2
+                        continue
+                    statement_buffer.append(current_character)
+                    character_index += 1
+                    continue
+
+                if parser_state in {
+                    "single_quote",
+                    "double_quote",
+                    "backtick_quote",
+                }:
+                    quote_character = {
+                        "single_quote": "'",
+                        "double_quote": '"',
+                        "backtick_quote": "`",
+                    }[parser_state]
+                    statement_buffer.append(current_character)
+                    if current_character == "\\" and next_character:
+                        statement_buffer.append(next_character)
+                        character_index += 2
+                        continue
+                    if current_character == quote_character:
+                        if next_character == quote_character:
+                            statement_buffer.append(next_character)
+                            character_index += 2
+                            continue
+                        parser_state = "normal"
+                    character_index += 1
+                    continue
+
+                if parser_state == "line_comment":
+                    statement_buffer.append(current_character)
+                    if current_character in "\r\n":
+                        parser_state = "normal"
+                    character_index += 1
+                    continue
+
+                statement_buffer.append(current_character)
+                if current_character == "*" and next_character == "/":
+                    statement_buffer.append(next_character)
+                    parser_state = "normal"
+                    character_index += 2
+                else:
+                    character_index += 1
+
+        trailing_statement = "".join(statement_buffer)
+        if self._has_executable_content(trailing_statement):
+            raise ValueError(
+                "Line missing end-of-line terminator ("
+                + current_delimiter
+                + ") => "
+                + trailing_statement
+            )
+
     def run_script(self, sql: str) -> None:
         """按当前分隔符拆分并执行 SQL 脚本。"""
+        def execute_statement(statement: str) -> None:
+            with closing(self.connection.cursor()) as cursor:
+                logger.debug("SQL script statement: %s", statement)
+                cursor.execute(statement)
+
         try:
-            script = ""
-            for line in sql.splitlines():
-                strip_line = line.strip()
-                if "DELIMITER $$" in strip_line:
-                    self.delimiter = "$$"
-                    continue
-                if "DELIMITER ;" in strip_line:
-                    self.delimiter = ";"
-                    continue
-                if strip_line and not strip_line.startswith("//") and not strip_line.startswith("--"):
-                    script += line + "\n"
-                    if strip_line.endswith(self.delimiter):
-                        if self.delimiter == "$$":
-                            script = script[:-1].rstrip("$") + ";"
-                        with closing(self.connection.cursor()) as cursor:
-                            logger.debug("SQL script statement: %s", script)
-                            cursor.execute(script)
-                        script = ""
-            if script.strip():
-                raise ValueError(
-                    "Line missing end-of-line terminator ("
-                    + self.delimiter
-                    + ") => "
-                    + script
-                )
+            for statement in self._iter_statements(sql):
+                execute_statement(statement)
             if self.autocommit:
                 self.connection.commit()
         except Exception:
@@ -211,7 +387,7 @@ class Database(ABC):
 
         :param table: 表名
         :param records: 要插入的记录列表，每个记录为字典
-        :return: 最后插入的记录 ID
+        :return: 实际插入的记录数
         """
         raise NotImplementedError
 
@@ -336,6 +512,8 @@ class Database(ABC):
 class SQLite(Database):
     """SQLite 数据库连接工具类，支持线程安全的操作
 
+    每个公开数据库操作默认在成功后自动提交，发生异常时自动回滚。
+
     支持与原生 cursor.execute 相似的调用方式：
     - 位置参数：db.execute("SELECT * FROM users WHERE id = ?", 1)
     - 命名参数：db.execute("SELECT * FROM users WHERE id = :id", id=1)
@@ -350,37 +528,31 @@ class SQLite(Database):
                 f"file:wtfutil-{uuid.uuid4().hex}?mode=memory&cache=shared"
             )
             self._connection_uses_uri = True
-        self._thread_local = threading.local()
-        self._connections: set[sqlite3.Connection] = set()
-        self._connections_lock = threading.Lock()
         self._operation_lock = threading.RLock()
-        self._connection_generation = 0
+        self._connection: sqlite3.Connection | None = None
 
     def _get_connection(self) -> sqlite3.Connection:
-        thread_generation = getattr(self._thread_local, "generation", -1)
-        if (
-            not hasattr(self._thread_local, "conn")
-            or thread_generation != self._connection_generation
-        ):
-            connection = sqlite3.connect(
+        if self._connection is None:
+            self._connection = sqlite3.connect(
                 self._connection_target,
                 check_same_thread=False,
                 uri=self._connection_uses_uri,
             )
-            with self._connections_lock:
-                self._connections.add(connection)
-            self._thread_local.conn = connection
-            self._thread_local.generation = self._connection_generation
-        return self._thread_local.conn
+        return self._connection
 
     def _build_where_clause(self, where_clause: Union[Dict[str, Any], str, None], params: List[Any]) -> str:
         """构建 WHERE 子句并填充参数"""
         if not where_clause:
             return "1"
         elif isinstance(where_clause, dict):
-            where = " AND ".join(f"`{k}` = ?" for k in where_clause.keys())
-            params.extend(where_clause.values())
-            return where
+            expressions = []
+            for column_name, column_value in where_clause.items():
+                if column_value is None:
+                    expressions.append(f"`{column_name}` IS NULL")
+                else:
+                    expressions.append(f"`{column_name}` = ?")
+                    params.append(column_value)
+            return " AND ".join(expressions)
         return where_clause
 
     @_serialize_sqlite_operation
@@ -437,7 +609,7 @@ class SQLite(Database):
                     sql = f"INSERT OR IGNORE INTO {table} ({columns}) VALUES ({placeholders})"
                     logger.debug(f"SQL: {sql} -- Params: {values}")
                     cursor.executemany(sql, values)
-                    return cursor.lastrowid
+                    return cursor.rowcount
         except Exception as e:
             logger.error(f"Error in insert_many: {e}")
             raise
@@ -610,28 +782,27 @@ class SQLite(Database):
 
     def close(self):
         with self._operation_lock:
-            with self._connections_lock:
-                connections = list(self._connections)
-                self._connections.clear()
-                self._connection_generation += 1
-
-            for connection in connections:
+            connection = self._connection
+            self._connection = None
+            if connection is not None:
                 try:
                     connection.close()
                 except sqlite3.Error:
                     logger.debug("关闭 SQLite 连接失败", exc_info=True)
 
-            if hasattr(self._thread_local, "conn"):
-                del self._thread_local.conn
-            if hasattr(self._thread_local, "generation"):
-                del self._thread_local.generation
-
     def __del__(self):
-        self.close()
+        try:
+            self.close()
+        except Exception:
+            pass
 
 
 class MYSQL(Database):
     """MySQL 数据库连接工具类，提供 CRUD 功能
+
+    ``autocommit=True`` 是默认值；写操作成功后自动提交，失败时自动回滚。
+    设置为 ``False`` 时，由调用方通过 :meth:`commit` 和 :meth:`rollback`
+    管理事务边界。
 
     支持与原生 cursor.execute 相似的调用方式：
     - 位置参数：db.execute("SELECT * FROM users WHERE id = %s", 1)
@@ -666,9 +837,14 @@ class MYSQL(Database):
         if not where_clause:
             return "1"
         elif isinstance(where_clause, dict):
-            where = " AND ".join(f"`{k}` = %s" for k in where_clause.keys())
-            params.extend(where_clause.values())
-            return where
+            expressions = []
+            for column_name, column_value in where_clause.items():
+                if column_value is None:
+                    expressions.append(f"`{column_name}` IS NULL")
+                else:
+                    expressions.append(f"`{column_name}` = %s")
+                    params.append(column_value)
+            return " AND ".join(expressions)
         return where_clause
 
     def insert(self, table: str, record: Dict[str, Any]) -> int:
@@ -728,7 +904,7 @@ class MYSQL(Database):
                 cursor.executemany(sql, values)
                 if self.autocommit:
                     conn.commit()
-                return cursor.lastrowid
+                return cursor.rowcount
         except Exception as e:
             if self.autocommit:
                 conn.rollback()

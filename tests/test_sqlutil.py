@@ -9,7 +9,7 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from wtfutil.sqlutil import MYSQL, SQLite, ScriptRunner
+from wtfutil.sqlutil import MYSQL, ScriptRunner, SQLite
 
 
 class TestSQLite(unittest.TestCase):
@@ -45,17 +45,32 @@ class TestSQLite(unittest.TestCase):
                 first_database.close()
                 second_database.close()
 
+    def test_write_is_committed_before_close_by_default(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            database_path = Path(temporary_directory) / "committed.db"
+            database = SQLite(str(database_path))
+            database.execute("CREATE TABLE items (name TEXT PRIMARY KEY)")
+            database.insert("items", {"name": "committed"})
+            database.close()
+
+            reopened_database = SQLite(str(database_path))
+            try:
+                self.assertEqual(reopened_database.count("items"), 1)
+            finally:
+                reopened_database.close()
+
     def test_insert_many_uses_first_record_column_order(self) -> None:
         database = SQLite(":memory:")
         try:
             database.execute("CREATE TABLE items (name TEXT, value INTEGER)")
-            database.insert_many(
+            inserted_count = database.insert_many(
                 "items",
                 [
                     {"name": "first", "value": 1},
                     {"value": 2, "name": "second"},
                 ],
             )
+            self.assertEqual(inserted_count, 2)
             rows = database.select("items", order="value")
             self.assertEqual(
                 rows,
@@ -64,6 +79,28 @@ class TestSQLite(unittest.TestCase):
                     {"name": "second", "value": 2},
                 ],
             )
+        finally:
+            database.close()
+
+    def test_common_crud_and_null_filter(self) -> None:
+        database = SQLite(":memory:")
+        try:
+            database.execute(
+                "CREATE TABLE items (id INTEGER PRIMARY KEY, name TEXT, note TEXT)"
+            )
+            first_id = database.insert("items", {"name": "first", "note": None})
+            second_id = database.insert("items", {"name": "second", "note": "value"})
+
+            self.assertTrue(database.record_exists("items", {"id": first_id}))
+            self.assertEqual(database.count("items", {"note": None}), 1)
+            self.assertEqual(
+                database.select_one("items", where_clause={"note": None})["name"],
+                "first",
+            )
+            self.assertEqual(database.update("items", {"note": "updated"}, {"id": first_id}), 1)
+            self.assertEqual(database.select_by_id("items", second_id)["name"], "second")
+            self.assertEqual(database.delete("items", {"id": second_id}), 1)
+            self.assertEqual(database.count("items"), 1)
         finally:
             database.close()
 
@@ -94,6 +131,23 @@ class TestSQLite(unittest.TestCase):
 
             with self.assertRaises(sqlite3.ProgrammingError):
                 connection_holder[0].execute("SELECT 1")
+
+    def test_short_lived_threads_reuse_one_connection(self) -> None:
+        database = SQLite(":memory:")
+        connection_identifiers: list[int] = []
+        try:
+            for _ in range(20):
+                worker = threading.Thread(
+                    target=lambda: connection_identifiers.append(
+                        id(database._get_connection())
+                    )
+                )
+                worker.start()
+                worker.join()
+
+            self.assertEqual(len(set(connection_identifiers)), 1)
+        finally:
+            database.close()
 
     def test_memory_database_is_shared_between_threads(self) -> None:
         database = SQLite(":memory:")
@@ -163,6 +217,7 @@ class TestMySQLSqlGeneration(unittest.TestCase):
         executed_sql, executed_values = cursor.execute.call_args.args
         self.assertIn("VALUES (%s, %s)", executed_sql)
         self.assertEqual(executed_values, ("first", 1))
+        connection.commit.assert_called_once_with()
 
     def test_connection_enables_autocommit_by_default(self) -> None:
         connection = mock.Mock()
@@ -247,7 +302,7 @@ class TestScriptRunner(unittest.TestCase):
 
         ScriptRunner(connection, autocommit=True).run_script("SELECT 1;\n")
 
-        cursor.execute.assert_called_once_with("SELECT 1;\n")
+        cursor.execute.assert_called_once_with("SELECT 1;")
         cursor.close.assert_called_once_with()
         connection.commit.assert_called_once_with()
 
@@ -261,6 +316,103 @@ class TestScriptRunner(unittest.TestCase):
             ScriptRunner(connection, autocommit=True).run_script("SELECT 1;\n")
 
         connection.rollback.assert_called_once_with()
+
+    def test_multiple_statements_on_one_line_are_executed_separately(self) -> None:
+        cursors = [mock.MagicMock(), mock.MagicMock()]
+        connection = mock.Mock()
+        connection.cursor.side_effect = cursors
+
+        ScriptRunner(connection, autocommit=True).run_script("SELECT 1; SELECT 2;")
+
+        self.assertEqual(connection.cursor.call_count, 2)
+        self.assertEqual(cursors[0].execute.call_args.args[0].strip(), "SELECT 1;")
+        self.assertEqual(cursors[1].execute.call_args.args[0].strip(), "SELECT 2;")
+        for cursor in cursors:
+            cursor.close.assert_called_once_with()
+        connection.commit.assert_called_once_with()
+
+    def test_delimiters_inside_literals_and_comments_do_not_split(self) -> None:
+        cursors = [mock.MagicMock(), mock.MagicMock()]
+        connection = mock.Mock()
+        connection.cursor.side_effect = cursors
+        script = (
+            "INSERT INTO items(value) VALUES ('a;b');\n"
+            "/* comment ; remains attached to the next statement */\n"
+            'SELECT "c;d";\n'
+        )
+
+        ScriptRunner(connection).run_script(script)
+
+        self.assertEqual(connection.cursor.call_count, 2)
+        self.assertIn("'a;b'", cursors[0].execute.call_args.args[0])
+        self.assertIn("comment ;", cursors[1].execute.call_args.args[0])
+        self.assertIn('"c;d"', cursors[1].execute.call_args.args[0])
+
+    def test_mysql_double_minus_operator_is_not_a_comment(self) -> None:
+        cursors = [mock.MagicMock(), mock.MagicMock()]
+        connection = mock.Mock()
+        connection.cursor.side_effect = cursors
+
+        ScriptRunner(connection).run_script("SELECT 1--1; SELECT 2;")
+
+        self.assertEqual(connection.cursor.call_count, 2)
+        self.assertEqual(cursors[0].execute.call_args.args[0], "SELECT 1--1;")
+        self.assertEqual(cursors[1].execute.call_args.args[0].strip(), "SELECT 2;")
+
+    def test_mysql_line_comment_requires_following_whitespace(self) -> None:
+        cursor = mock.MagicMock()
+        connection = mock.Mock()
+        connection.cursor.return_value = cursor
+
+        ScriptRunner(connection).run_script("-- comment ; ignored\nSELECT 1;")
+
+        cursor.execute.assert_called_once()
+        self.assertIn("-- comment ; ignored", cursor.execute.call_args.args[0])
+        self.assertIn("SELECT 1;", cursor.execute.call_args.args[0])
+
+    def test_mysql_executable_version_comment_is_executed(self) -> None:
+        cursor = mock.MagicMock()
+        connection = mock.Mock()
+        connection.cursor.return_value = cursor
+        executable_comment = (
+            "/*!40101 SET @OLD_CHARACTER_SET_CLIENT="
+            "@@CHARACTER_SET_CLIENT */;"
+        )
+
+        ScriptRunner(connection).run_script(executable_comment)
+
+        cursor.execute.assert_called_once_with(executable_comment)
+        cursor.close.assert_called_once_with()
+
+    def test_custom_delimiter_preserves_internal_semicolons(self) -> None:
+        cursor = mock.MagicMock()
+        connection = mock.Mock()
+        connection.cursor.return_value = cursor
+        script = (
+            "DELIMITER //\n"
+            "CREATE PROCEDURE example()\n"
+            "BEGIN\n"
+            "    SELECT 'first;value';\n"
+            "    SELECT 2;\n"
+            "END//\n"
+            "DELIMITER ;\n"
+        )
+
+        ScriptRunner(connection).run_script(script)
+
+        executed_statement = cursor.execute.call_args.args[0]
+        self.assertIn("SELECT 'first;value';", executed_statement)
+        self.assertIn("SELECT 2;", executed_statement)
+        self.assertTrue(executed_statement.endswith("END;"))
+        cursor.close.assert_called_once_with()
+
+    def test_delimiter_must_be_non_empty_token(self) -> None:
+        connection = mock.Mock()
+
+        with self.assertRaisesRegex(ValueError, "delimiter"):
+            ScriptRunner(connection, delimiter="")
+        with self.assertRaisesRegex(ValueError, "DELIMITER"):
+            ScriptRunner(connection).run_script("DELIMITER\n")
 
 
 if __name__ == "__main__":

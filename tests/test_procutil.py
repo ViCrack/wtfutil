@@ -10,6 +10,17 @@ from wtfutil import procutil
 
 
 class TestProcessMatchingSafety(unittest.TestCase):
+    def test_find_process_by_name_is_case_insensitive(self) -> None:
+        process = mock.Mock()
+        process.info = {"pid": 12345, "name": "Python.EXE"}
+        with mock.patch.object(procutil.psutil, "process_iter", return_value=[process]):
+            self.assertEqual(procutil.find_process_by_name("python.exe"), 12345)
+
+    def test_pypy_process_names_are_recognized(self) -> None:
+        for process_name in ("pypy", "pypy3", "pypy3.exe"):
+            with self.subTest(process_name=process_name):
+                self.assertTrue(procutil._is_python_process(process_name))
+
     def test_empty_patterns_are_rejected(self) -> None:
         for invalid_value in ("", "   "):
             with self.subTest(invalid_value=invalid_value):
@@ -40,9 +51,8 @@ class TestProcessMatchingSafety(unittest.TestCase):
         process_mock.kill.assert_called_once_with()
 
     def test_suspend_current_process_is_rejected(self) -> None:
-        with mock.patch.object(procutil.os, "name", "nt"):
-            with self.assertRaises(ValueError):
-                procutil.suspend_process_by_pid(os.getpid())
+        with mock.patch.object(procutil.os, "name", "nt"), self.assertRaises(ValueError):
+            procutil.suspend_process_by_pid(os.getpid())
 
     def test_absolute_script_path_does_not_match_other_directory(self) -> None:
         expected_script = os.path.abspath(
