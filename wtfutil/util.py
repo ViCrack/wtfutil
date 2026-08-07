@@ -4,12 +4,15 @@
 
 import datetime
 import queue
+import sys
+import threading
 import time
+from pathlib import Path
 from collections import defaultdict
 from functools import wraps
 from typing import Any, Dict, Iterable, List, Union
 
-from ._base import get_resource, get_resource_dir
+from ._resource import find_resource_directory, resolve_resource_path
 
 __all__ = [
     # data structures
@@ -29,19 +32,62 @@ __all__ = [
 
 
 class UniqueQueue(queue.Queue):
-    """queue.Queue 子类：同一对象（或等价 dict）重复 put 会被忽略。"""
+    """在整个队列生命周期内忽略重复值的 ``queue.Queue``。"""
 
     def __init__(self, maxsize: int = 0) -> None:
         super().__init__(maxsize)
         self.queue_set: set = set()
+        self._deduplication_lock = threading.Lock()
+
+    @staticmethod
+    def _make_hashable(item: Any) -> Any:
+        """递归转换常见容器，使内容等价的值可稳定去重。"""
+        if isinstance(item, dict):
+            return (
+                "dict",
+                frozenset(
+                    (
+                        UniqueQueue._make_hashable(key),
+                        UniqueQueue._make_hashable(value),
+                    )
+                    for key, value in item.items()
+                ),
+            )
+        if isinstance(item, (list, tuple)):
+            return (
+                type(item).__name__,
+                tuple(UniqueQueue._make_hashable(value) for value in item),
+            )
+        if isinstance(item, (set, frozenset)):
+            return (
+                type(item).__name__,
+                frozenset(UniqueQueue._make_hashable(value) for value in item),
+            )
+        hash(item)
+        return item
 
     def put(self, item: Any, block: bool = True, timeout: float | None = None) -> None:
-        hash_item = item
-        if isinstance(item, dict):
-            hash_item = tuple(item.items())
-        if hash_item not in self.queue_set:
-            self.queue_set.add(hash_item)
+        hashable_item = self._make_hashable(item)
+        with self._deduplication_lock:
+            if hashable_item in self.queue_set:
+                return
             super().put(item, block, timeout)
+            self.queue_set.add(hashable_item)
+
+
+def get_resource_dir(basedir: str | Path | None = None) -> str:
+    """从指定路径或调用方脚本位置向上查找 ``resource`` 目录。"""
+    anchor_path = basedir or sys._getframe(1).f_code.co_filename
+    return str(find_resource_directory(anchor_path))
+
+
+def get_resource(
+    filename: str | Path,
+    basedir: str | Path | None = None,
+) -> str | None:
+    """按当前路径、项目 ``resource`` 目录、用户家目录查找资源。"""
+    anchor_path = basedir or sys._getframe(1).f_code.co_filename
+    return resolve_resource_path(filename, anchor_path=anchor_path)
 
 
 def measure_time(func):

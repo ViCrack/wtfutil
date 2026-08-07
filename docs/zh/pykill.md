@@ -1,6 +1,6 @@
 # pykill（命令行工具）
 
-根据脚本路径或命令行模式列出/终止 Python 进程的交互式 CLI。`pip install wtfutil` 后可用命令 **`pykill`**。未纳入 `wtfutil.__all__`；实现见 `wtfutil/pykill.py`。
+根据脚本路径或命令行模式列出/终止 Python 进程的交互式 CLI。`pip install wtfutil` 后可用命令 **`pykill`**。`wtfutil.pykill` 是 CLI 实现模块，不属于公开 SDK 子模块；代码中进行进程管理请使用 `wtfutil.procutil`。
 
 底层调用 `wtfutil.procutil`，展示使用 `rich` 表格，无参数时通过 `questionary` 多选要结束的进程。
 

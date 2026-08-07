@@ -21,14 +21,42 @@ from .httputil import requests_session, RequestsSession
 
 logger = logging.getLogger(__name__)
 
-_req: RequestsSession | None = None
+_request_context = threading.local()
 
 
 def _get_req() -> RequestsSession:
-    global _req
-    if _req is None:
-        _req = requests_session()
-    return _req
+    """返回当前线程独立的通知 Session，避免并发共享可变状态。"""
+    session = getattr(_request_context, "session", None)
+    if session is None:
+        session = requests_session(timeout=15)
+        _request_context.session = session
+    return session
+
+
+def _close_thread_request_session() -> None:
+    """关闭并移除当前线程创建的通知 Session。"""
+    session = getattr(_request_context, "session", None)
+    if session is not None:
+        session.close()
+        del _request_context.session
+
+
+def _dispatch_notification(mode, title: str, content: str) -> None:
+    """执行单个通知通道，记录异常并清理线程级 HTTP 资源。"""
+    try:
+        mode(title, content)
+    except Exception:
+        logger.exception("通知通道 %s 执行失败", mode.__name__)
+    finally:
+        _close_thread_request_session()
+
+
+def _config_flag_enabled(value: object) -> bool:
+    """按配置文件常见文本格式判断开关是否启用。"""
+    if isinstance(value, str):
+        return value.strip().lower() in {"1", "true", "yes", "on"}
+    return bool(value)
+
 
 # 通知服务
 # from qinglong
@@ -162,7 +190,7 @@ def bark(title: str, content: str) -> None:
     if response["code"] == 200:
         logger.debug("bark 推送成功！")
     else:
-        logger.error("bark 推送失败！{}", response)
+        logger.error("bark 推送失败！%s", response)
 
 
 def console(title: str, content: str) -> None:
@@ -199,7 +227,7 @@ def dingding_bot(title: str, content: str) -> None:
     if not response["errcode"]:
         logger.debug("钉钉机器人 推送成功！")
     else:
-        logger.error("钉钉机器人 推送失败！{}", response)
+        logger.error("钉钉机器人 推送失败！%s", response)
 
 
 def feishu_bot(title: str, content: str):
@@ -233,7 +261,7 @@ def feishu_text(content: str) -> None:
     if response.get("StatusCode") == 0:
         logger.debug("飞书 推送成功！")
     else:
-        logger.error("飞书 推送失败！错误信息如下：\n{}", response)
+        logger.error("飞书 推送失败！错误信息如下：\n%s", response)
 
 
 def feishu_richtext(title: str, content: list) -> None:
@@ -282,7 +310,7 @@ def feishu_richtext(title: str, content: list) -> None:
     if response.get("StatusCode") == 0:
         logger.debug("飞书 推送成功！")
     else:
-        logger.error("飞书 推送失败！错误信息如下：\n", response)
+        logger.error("飞书 推送失败！错误信息如下：\n%s", response)
 
 
 def go_cqhttp(title: str, content: str) -> None:
@@ -300,7 +328,7 @@ def go_cqhttp(title: str, content: str) -> None:
     if response["status"] == "ok":
         logger.debug("go-cqhttp 推送成功！")
     else:
-        logger.error("go-cqhttp 推送失败！{}", response)
+        logger.error("go-cqhttp 推送失败！%s", response)
 
 
 def gotify(title: str, content: str) -> None:
@@ -323,7 +351,7 @@ def gotify(title: str, content: str) -> None:
     if response.get("id"):
         logger.debug("gotify 推送成功！")
     else:
-        logger.error("gotify 推送失败！{}", response)
+        logger.error("gotify 推送失败！%s", response)
 
 
 def iGot(title: str, content: str) -> None:
@@ -391,7 +419,7 @@ def pushdeer(title: str, content: str) -> None:
     if len(response.get("content").get("result")) > 0:
         logger.debug("PushDeer 推送成功！")
     else:
-        logger.error("PushDeer 推送失败！错误信息：{}", response)
+        logger.error("PushDeer 推送失败！错误信息：%s", response)
 
 
 def chat(title: str, content: str) -> None:
@@ -409,7 +437,7 @@ def chat(title: str, content: str) -> None:
     if response.status_code == 200:
         logger.debug("Chat 推送成功！")
     else:
-        logger.error("Chat 推送失败！错误信息：{}", response)
+        logger.error("Chat 推送失败！错误信息：%s", response)
 
 
 def pushplus_bot(title: str, content: str) -> None:
@@ -501,7 +529,7 @@ def wecom_app(title: str, content: str) -> None:
     if response == "ok":
         logger.debug("企业微信推送成功！")
     else:
-        logger.error("企业微信推送失败！错误信息如下：\n{}", response)
+        logger.error("企业微信推送失败！错误信息如下：\n%s", response)
 
 
 class WeCom:
@@ -589,7 +617,7 @@ def wecom_bot(title: str, content: str) -> None:
     if response["errcode"] == 0:
         logger.debug("企业微信机器人推送成功！")
     else:
-        logger.error("企业微信机器人推送失败！{}", response)
+        logger.error("企业微信机器人推送失败！%s", response)
 
 
 def telegram_bot(title: str, content: str) -> None:
@@ -680,16 +708,15 @@ def smtp(title: str, content: str) -> None:
     """
     if (
             not push_config.get("SMTP_SERVER")
-            or not push_config.get("SMTP_SSL")
             or not push_config.get("SMTP_EMAIL")
             or not push_config.get("SMTP_PASSWORD")
             or not push_config.get("SMTP_NAME")
     ):
         logger.error(
-            "SMTP 邮件 的 SMTP_SERVER 或者 SMTP_SSL 或者 SMTP_EMAIL 或者 SMTP_PASSWORD 或者 SMTP_NAME 未设置!!"
+            "SMTP 邮件的服务器、邮箱、密码或名称未设置"
         )
         raise ValueError(
-            "SMTP 邮件 的 SMTP_SERVER 或者 SMTP_SSL 或者 SMTP_EMAIL 或者 SMTP_PASSWORD 或者 SMTP_NAME 未设置!!"
+            "SMTP 邮件的服务器、邮箱、密码或名称未设置"
         )
     logger.debug("SMTP 邮件 服务启动")
 
@@ -709,20 +736,22 @@ def smtp(title: str, content: str) -> None:
     message["Subject"] = Header(title, "utf-8")
 
     try:
-        smtp_server = (
-            smtplib.SMTP_SSL(push_config.get("SMTP_SERVER"))
-            if push_config.get("SMTP_SSL") == "true"
-            else smtplib.SMTP(push_config.get("SMTP_SERVER"))
-        )
-        smtp_server.login(
-            push_config.get("SMTP_EMAIL"), push_config.get("SMTP_PASSWORD")
-        )
-        smtp_server.sendmail(
-            push_config.get("SMTP_EMAIL"),
-            push_config.get("SMTP_EMAIL"),
-            message.as_bytes(),
-        )
-        smtp_server.close()
+        use_ssl = _config_flag_enabled(push_config.get("SMTP_SSL"))
+        server_text = str(push_config.get("SMTP_SERVER"))
+        parsed_server = urllib.parse.urlsplit(f"//{server_text}")
+        server_host = parsed_server.hostname or server_text
+        server_port = parsed_server.port or (465 if use_ssl else 25)
+        smtp_class = smtplib.SMTP_SSL if use_ssl else smtplib.SMTP
+
+        with smtp_class(server_host, server_port, timeout=15) as smtp_server:
+            smtp_server.login(
+                push_config.get("SMTP_EMAIL"), push_config.get("SMTP_PASSWORD")
+            )
+            smtp_server.sendmail(
+                push_config.get("SMTP_EMAIL"),
+                push_config.get("SMTP_EMAIL"),
+                message.as_bytes(),
+            )
         logger.debug("SMTP 邮件 推送成功！")
     except Exception as e:
         logger.error(f"SMTP 邮件 推送失败！{e}")
@@ -948,8 +977,13 @@ def parse_body(body, content_type):
 
 
 def format_notify_content(url, body, title, content):
-    if "$title" not in url and "$title" not in body:
-        return {}
+    has_placeholder = any(
+        placeholder in value
+        for placeholder in ("$title", "$content")
+        for value in (url, body)
+    )
+    if not has_placeholder:
+        return "", ""
 
     formatted_url = url.replace("$title", urllib.parse.quote_plus(title)).replace(
         "$content", urllib.parse.quote_plus(content)
@@ -1009,7 +1043,7 @@ def _rebuild_notify_functions() -> None:
     notify_function.clear()
     if push_config.get("BARK_PUSH"):
         notify_function.append(bark)
-    if push_config.get("CONSOLE"):
+    if _config_flag_enabled(push_config.get("CONSOLE")):
         notify_function.append(console)
     if push_config.get("DD_BOT_TOKEN") and push_config.get("DD_BOT_SECRET"):
         notify_function.append(dingding_bot)
@@ -1045,7 +1079,6 @@ def _rebuild_notify_functions() -> None:
         notify_function.append(aibotk)
     if (
             push_config.get("SMTP_SERVER")
-            and push_config.get("SMTP_SSL")
             and push_config.get("SMTP_EMAIL")
             and push_config.get("SMTP_PASSWORD")
             and push_config.get("SMTP_NAME")
@@ -1098,23 +1131,35 @@ def send(title: str, content: str) -> None:
     _ensure_push_config()
 
     # 根据标题跳过一些消息推送，环境变量：SKIP_PUSH_TITLE 用回车分隔
-    skipTitle = os.getenv("SKIP_PUSH_TITLE")
-    if skipTitle:
-        if title in re.split("\n", skipTitle):
+    skip_title = os.getenv("SKIP_PUSH_TITLE")
+    if skip_title:
+        if title in re.split("\n", skip_title):
             logger.debug(f"{title} 在SKIP_PUSH_TITLE环境变量内，跳过推送！")
             return
 
-    hitokoto = push_config.get("HITOKOTO")
+    hitokoto = _config_flag_enabled(push_config.get("HITOKOTO"))
 
-    text = one() if hitokoto else ""
+    if hitokoto:
+        try:
+            text = one()
+        finally:
+            _close_thread_request_session()
+    else:
+        text = ""
     content += "\n\n" + text
 
     ts = [
-        threading.Thread(target=mode, args=(title, content), name=mode.__name__)
+        threading.Thread(
+            target=_dispatch_notification,
+            args=(mode, title, content),
+            name=mode.__name__,
+        )
         for mode in notify_function
     ]
-    [t.start() for t in ts]
-    [t.join() for t in ts]
+    for thread in ts:
+        thread.start()
+    for thread in ts:
+        thread.join()
 
 
 __all__ = [

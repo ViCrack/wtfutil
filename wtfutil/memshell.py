@@ -26,6 +26,8 @@ from .memshellutil import (
     extract_generate_meta,
 )
 
+__all__ = ["main"]
+
 try:
     from requests.exceptions import RequestException
 except ImportError:  # pragma: no cover

@@ -3,20 +3,18 @@
 HTTP：增强 Session、原始报文、URL/IP/域名工具、SSL 相关适配器。
 
 ```python
-from wtfutil import requests_session, httpraw
-# 或
-from wtfutil import httputil
+from wtfutil.httputil import httpraw, requests_session
 ```
 
-## 模块副作用（导入即生效）
+## TLS 默认策略与兼容补丁
 
-导入 `httputil` 时会做这些事（无需手动调用）：
+导入 `httputil` 会把进程级默认 HTTPS 上下文切换为不校验证书，并屏蔽 urllib3 的不安全请求警告；这是该工具库面向探测和旧环境兼容场景的默认策略。导入不会修改全局 `requests.Session`、urllib3 连接类或系统代理函数。重定向编码处理只绑定到 `requests_session()` 创建的会话；chunked 连接类也只属于 `ChunkedAdapter`。
 
-- `urllib3.disable_warnings()`，减少证书告警刷屏。
-- `remove_ssl_verify()`：放宽全局 HTTPS 校验（影响**整个进程**内其它用到默认 SSL 上下文的代码，需注意）。
-- `patch_redirect()`：修补 `requests` 在部分重定向场景下的编码问题。
-- `patch_getproxies()`：在 Windows 上把注册表代理里错误的 `https://` 代理项改成 `http://`。
-- 钩住 `urllib3.connection.HTTPConnection`，用于后续 **chunked** 模式下的注释插入等。
+以下旧环境兼容函数仍保留：
+
+- `remove_ssl_verify()`：替换进程级默认 HTTPS 上下文；导入时已自动调用。
+- `patch_redirect()`：全局修改 `requests.Session.get_redirect_target`。
+- `patch_getproxies()`：全局修补旧版 Windows 注册表代理协议。
 
 ## requests_session()
 
@@ -28,28 +26,27 @@ from wtfutil import httputil
 | `base_url` 非空 | `BaseUrlSession` |
 | 其它 | `RequestsSession` |
 
-无论哪种：`session.verify = False`，HTTPS 使用 `CustomSslContextHttpAdapter`。
+无论哪种：TLS 证书默认不校验（`verify=False`），HTTPS 使用 `CustomSslContextHttpAdapter` 兼容旧式服务端连接。调用方仍可传 `verify=True` 或 CA bundle 路径恢复校验。
 
 ### 函数签名
 
 ```python
 def requests_session(
-    proxies: Union[Dict[str, str], int, None] = False,
+    proxies: Union[Dict[str, str], int, str, None] = False,
     timeout: Optional[float] = None,
     debug: bool = False,
     base_url: Optional[str] = None,
     user_agent: Optional[str] = None,
     use_cache: Union[bool, Dict[str, Any], None] = None,
-    fake_ip: bool = False,
+    fake_ip: bool | str = False,
     rate_limit: Optional[int] = None,
     chunked: Union[bool, ChunkedConfig] = False,
     max_retries: int = requests.adapters.DEFAULT_RETRIES,
     pool_connections: int = requests.adapters.DEFAULT_POOLSIZE,
     pool_maxsize: int = requests.adapters.DEFAULT_POOLSIZE,
-) -> RequestsSession: ...
+    verify: bool | str = False,
+) -> requests.Session: ...
 ```
-
-类型标注里 `proxies` 未写 `str`，但实现支持 **`str`**；`fake_ip` 为 **非空 str** 时当作固定 `X-Forwarded-For`。
 
 ### 参数说明
 
@@ -58,7 +55,7 @@ def requests_session(
 | `proxies` | `False` | `False`/`None`：不按此处设代理。`dict`：并 `trust_env=False`。`int`：`127.0.0.1:端口`。`str`：HTTP/HTTPS 同一代理 URL。 |
 | `timeout` | `None` | 固定到每次 `request` 的默认超时。 |
 | `debug` | `False` | 打印原始请求/响应；响应用 `EnhancedResponse`。 |
-| `base_url` | `None` | `BaseUrlSession`；注意 `urljoin` 下以 `/` 开头的路径会替换 base 路径。 |
+| `base_url` | `None` | `BaseUrlSession`；请求路径开头的 `/` 会先被去除，再继续拼接到 `base_url` 的路径后。 |
 | `user_agent` | `None` | `None` 则随机 UA。 |
 | `use_cache` | `None` | `True` 或 `dict` 传给 `CachedSession`。 |
 | `fake_ip` | `False` | `True` 随机 IPv4 写入 `X-Forwarded-For`；非空 str 为固定值。 |
@@ -66,6 +63,7 @@ def requests_session(
 | `chunked` | `False` | `True` 或 `ChunkedConfig` 启用分块上传适配器。 |
 | `max_retries` | urllib3 默认 | 可传 `urllib3.Retry`。 |
 | `pool_connections` / `pool_maxsize` | 10 | 连接池大小。 |
+| `verify` | `False` | `False` 不校验证书；`True` 显式开启；字符串可指定 CA bundle 路径。 |
 
 ### 与 requests.Session 的配合
 
@@ -76,10 +74,11 @@ def requests_session(
 ### 用法示例
 
 ```python
-from wtfutil import requests_session
+from wtfutil.httputil import requests_session
 from urllib3 import Retry
 
 req = requests_session()
+req = requests_session(verify=True)  # 需要安全校验时显式开启
 req = requests_session(proxies=10809, timeout=30)
 req = requests_session(timeout=30, max_retries=3, pool_connections=100, pool_maxsize=100)
 req = requests_session(base_url="https://open.feishu.cn/open-apis", timeout=30)
@@ -90,13 +89,33 @@ req = requests_session(
 )
 ```
 
+导入模块和新建会话都默认关闭证书校验。启用 chunked 不会替换 urllib3 的全局连接方法，并会保留原连接池的 HTTP、HTTPS 或 SOCKS 代理继承关系。
+
+使用 SOCKS 代理需要安装可选依赖：
+
+```bash
+pip install "wtfutil[socks]"
+```
+
 分块传输：
 
 ```python
-from wtfutil import httputil
+from wtfutil.httputil import ChunkedConfig, requests_session
 
-s = httputil.requests_session(chunked=True)
-s = httputil.requests_session(chunked=httputil.ChunkedConfig.aggressive())
+s = requests_session(chunked=True)
+s = requests_session(chunked=ChunkedConfig.aggressive())
+```
+
+### BaseUrlSession 路径拼接
+
+`BaseUrlSession.create_url()` 会把 `base_url` 规范为以 `/` 结尾，并对请求路径执行 `lstrip("/")` 后再调用 `urljoin`。因此开头斜杠**不会替换** base path：
+
+```python
+from wtfutil.httputil import requests_session
+
+session = requests_session(base_url="https://example.com/api/v1")
+response = session.get("/users")
+# 实际 URL：https://example.com/api/v1/users
 ```
 
 ## RequestsSession 与 Hook
@@ -116,7 +135,7 @@ s = httputil.requests_session(chunked=httputil.ChunkedConfig.aggressive())
 - `**kwargs` 传给 `session.request`
 
 ```python
-from wtfutil import httpraw
+from wtfutil.httputil import httpraw
 
 raw = """GET / HTTP/1.1
 Host: example.com

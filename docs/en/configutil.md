@@ -3,7 +3,7 @@
 Unified `wtfconfig.ini` loading with section merge and mtime-based hot reload.
 
 ```python
-from wtfutil import ensure_section, merge_section, reload_wtfconfig, get_wtfconfig_path
+from wtfutil.configutil import ensure_section, get_wtfconfig_path, merge_section, reload_wtfconfig
 
 defaults = {"BASE_URL": "https://party.mem.mk"}
 cfg = {}
@@ -21,8 +21,9 @@ built-in defaults ← ini section ← environment variables (highest).
 ## Hot reload
 
 - Whole-file cache keyed by `path + mtime`.
-- `ensure_section` updates `target` only on first load, path/mtime change, or `force_reload=True`.
+- `ensure_section` updates `target` on first load, path/mtime changes, section/default/environment-map changes, related environment-value changes, or `force_reload=True`.
 - Unchanged signature leaves `target` alone (keeps runtime edits).
+- Each target keeps only its latest application signature and object identity, preventing stale section matches and object-ID reuse; tracking is bounded to 256 recent targets.
 - `reload_wtfconfig()` drops caches.
 
 ## API

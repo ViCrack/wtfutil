@@ -3,7 +3,7 @@
 通过 **非阻塞文件锁**（`portalocker`）保证同一台机器上同一脚本（或同一 `flavor_id`）只运行一个实例。默认锁文件在系统临时目录。
 
 ```python
-from wtfutil import single_instance, SingleInstance, SingleInstanceException
+from wtfutil.singleinstance import SingleInstance, SingleInstanceException, single_instance
 ```
 
 ## 符号
@@ -46,6 +46,7 @@ with SingleInstance(lockfile=r"D:\run\myapp.lock"):
 ## 说明
 
 - `__enter__` 使用 `LOCK_EX | LOCK_NB`，若锁被占用立即抛 `SingleInstanceException`。
-- `__exit__` 释放锁并尝试删除锁文件。
+- `__exit__` 释放并关闭锁，但有意保留可复用的锁文件；解锁后再删除会在 Unix 上引入 inode/路径竞态。
+- 获取锁失败时会先关闭刚打开的文件句柄，再抛出 `SingleInstanceException`。
 - 实现参考 tendo 相关讨论，减轻 Windows 下多线程/子进程的锁竞争问题。
 - 本地测试：`python -m wtfutil.singleinstance` 会进入循环直到 Ctrl+C；开第二个终端再运行可验证互斥。

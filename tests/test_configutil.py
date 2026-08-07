@@ -121,6 +121,35 @@ class TestConfigUtil(unittest.TestCase):
             merged = cu.merge_section(defaults, "notify")
             self.assertEqual(merged["CONSOLE"], "true")
 
+    def test_environment_change_refreshes_existing_target(self):
+        defaults = {"CONSOLE": "false"}
+        with mock.patch.object(cu, "get_wtfconfig_path", return_value=None):
+            cu.reload_wtfconfig()
+            target: dict = {}
+            self._setenv("CONSOLE", "true")
+            self.assertTrue(cu.ensure_section(target, defaults, "notify"))
+            self.assertEqual(target["CONSOLE"], "true")
+
+            self._setenv("CONSOLE", "false")
+            self.assertTrue(cu.ensure_section(target, defaults, "notify"))
+            self.assertEqual(target["CONSOLE"], "false")
+
+    def test_reusing_target_for_another_section_invalidates_cache(self):
+        with mock.patch.object(cu, "get_wtfconfig_path", return_value=None):
+            cu.reload_wtfconfig()
+            target: dict = {}
+            self.assertTrue(
+                cu.ensure_section(target, {"VALUE": "a"}, "section-a")
+            )
+            self.assertTrue(
+                cu.ensure_section(target, {"VALUE": "b"}, "section-b")
+            )
+            self.assertTrue(
+                cu.ensure_section(target, {"VALUE": "a"}, "section-a")
+            )
+
+        self.assertEqual(target, {"VALUE": "a"})
+
     def test_reload_wtfconfig_forces_reread(self):
         self._write_ini("[img]\nAPIHZ_IMG_ID = a\n")
         defaults = {"APIHZ_IMG_ID": ""}
@@ -135,6 +164,22 @@ class TestConfigUtil(unittest.TestCase):
                 cu.ensure_section(target, defaults, "img", uppercase_keys=True)
             )
             self.assertEqual(target["APIHZ_IMG_ID"], "b")
+
+    def test_applied_target_cache_is_bounded(self):
+        with mock.patch.object(cu, "get_wtfconfig_path", return_value=None):
+            cu.reload_wtfconfig()
+            for target_index in range(cu._APPLIED_CACHE_MAXSIZE + 20):
+                target: dict = {}
+                cu.ensure_section(
+                    target,
+                    {"INDEX": str(target_index)},
+                    f"section-{target_index}",
+                )
+
+        self.assertLessEqual(
+            len(cu._applied),
+            cu._APPLIED_CACHE_MAXSIZE,
+        )
 
 
 if __name__ == "__main__":

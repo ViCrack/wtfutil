@@ -6,14 +6,20 @@ import logging
 import random
 from typing import Callable, Iterable, List, Tuple
 
-from requests import Response
+from requests import Response, Session
 
 from .configutil import ensure_section
-from .httputil import RequestsSession, requests_session
+from .httputil import requests_session
 
 logger = logging.getLogger(__name__)
 
 _MIN_IMAGE_BYTES = 256
+_IMAGE_SIGNATURES = (
+    b"\x89PNG\r\n\x1a\n",
+    b"\xff\xd8\xff",
+    b"GIF87a",
+    b"GIF89a",
+)
 
 _APIHZ_URL = "https://cn.apihz.cn/api/img/apihzimgtx.php"
 
@@ -61,21 +67,35 @@ def _validate_image_bytes(resp: Response) -> bytes:
     data = resp.content
     if len(data) < _MIN_IMAGE_BYTES:
         raise ValueError(f"response too small ({len(data)} bytes)")
+    content_type = resp.headers.get("Content-Type", "").lower()
+    has_image_content_type = content_type.startswith("image/")
+    has_known_signature = any(
+        data.startswith(signature)
+        for signature in _IMAGE_SIGNATURES
+    )
+    has_webp_signature = (
+        data.startswith(b"RIFF")
+        and len(data) >= 12
+        and data[8:12] == b"WEBP"
+    )
+    has_image_signature = has_known_signature or has_webp_signature
+    if not has_image_content_type and not has_image_signature:
+        raise ValueError(f"response is not an image ({content_type or 'unknown content type'})")
     return data
 
 
-def _fetch_direct(session: RequestsSession, url: str) -> bytes:
+def _fetch_direct(session: Session, url: str) -> bytes:
     return _validate_image_bytes(session.get(url, allow_redirects=True))
 
 
-def _direct_fetcher(url: str) -> Callable[[RequestsSession], bytes]:
-    def _fetch(session: RequestsSession) -> bytes:
+def _direct_fetcher(url: str) -> Callable[[Session], bytes]:
+    def _fetch(session: Session) -> bytes:
         return _fetch_direct(session, url)
 
     return _fetch
 
 
-def _fetch_apihz(session: RequestsSession) -> bytes:
+def _fetch_apihz(session: Session) -> bytes:
     img_id = img_config.get("APIHZ_IMG_ID", "").strip()
     img_key = img_config.get("APIHZ_IMG_KEY", "").strip()
     if not img_id or not img_key:
@@ -99,9 +119,9 @@ def _fetch_apihz(session: RequestsSession) -> bytes:
     return _fetch_direct(session, img_url)
 
 
-def _avatar_providers() -> List[Tuple[str, Callable[[RequestsSession], bytes]]]:
+def _avatar_providers() -> List[Tuple[str, Callable[[Session], bytes]]]:
     _load_img_config()
-    providers: List[Tuple[str, Callable[[RequestsSession], bytes]]] = [
+    providers: List[Tuple[str, Callable[[Session], bytes]]] = [
         (name, _direct_fetcher(url)) for name, url in _DIRECT_AVATAR_SOURCES
     ]
     if img_config.get("APIHZ_IMG_ID", "").strip() and img_config.get("APIHZ_IMG_KEY", "").strip():
@@ -110,8 +130,8 @@ def _avatar_providers() -> List[Tuple[str, Callable[[RequestsSession], bytes]]]:
 
 
 def fetch_random_bytes(
-    fetchers: Iterable[Callable[[RequestsSession], bytes]],
-    session: RequestsSession | None = None,
+    fetchers: Iterable[Callable[[Session], bytes]],
+    session: Session | None = None,
     timeout: float = 30,
     shuffle: bool = True,
 ) -> bytes:
@@ -152,7 +172,7 @@ def fetch_random_bytes(
 
 
 def random_avatar_bytes(
-    session: RequestsSession | None = None,
+    session: Session | None = None,
     timeout: float = 30,
 ) -> bytes:
     """

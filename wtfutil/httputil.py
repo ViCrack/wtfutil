@@ -29,7 +29,7 @@ from requests.utils import to_native_string
 from requests_toolbelt.utils import dump
 from rich.progress import Progress
 
-from .strutil import *
+from .strutil import extract_dict, rand_base
 
 # 常见住宅/商业 IP 段 (第一、第二字节)，避免数据中心/保留地址段
 # 格式: (octet1, octet2_base, octet2_range)  最终第二字节 = octet2_base + randint(0, octet2_range-1)
@@ -64,7 +64,7 @@ _http_context = threading.local()
 
 
 def get_redirect_target(self, resp: Response) -> str | None:
-    """hook requests.Session.get_redirect_target method"""
+    """按响应编码解析重定向地址，避免 Location 头出现乱码。"""
     if resp.is_redirect:
         location = resp.headers['location']
         location = location.encode('latin1')
@@ -74,14 +74,27 @@ def get_redirect_target(self, resp: Response) -> str | None:
 
 
 def patch_redirect() -> None:
+    """显式为全局 requests Session 安装重定向编码补丁。"""
     requests.Session.get_redirect_target = get_redirect_target
 
 
 def remove_ssl_verify() -> None:
+    """关闭进程级默认 HTTPS 校验。"""
     ssl._create_default_https_context = ssl._create_unverified_context
 
 
+def _create_legacy_ssl_context() -> ssl.SSLContext:
+    """创建兼容旧式 TLS 服务端的 HTTPS 上下文。"""
+    context = create_urllib3_context()
+    context.load_default_certs()
+    # urllib3 在需要时执行主机名匹配；关闭 SSLContext 内置检查可兼容 verify=False。
+    context.check_hostname = False
+    context.options |= getattr(ssl, "OP_LEGACY_SERVER_CONNECT", 0x4)
+    return context
+
+
 def patch_getproxies() -> None:
+    """显式修正旧版 Windows 注册表中的 HTTPS 代理协议。"""
     # 高版本python已经修复了这个问题
     # https://bugs.python.org/issue42627
     # https://www.cnblogs.com/davyyy/p/14388623.html
@@ -99,10 +112,9 @@ def patch_getproxies() -> None:
         urllib.request.getproxies_registry = hook
 
 
-urllib3.disable_warnings()
+# 保持该工具库面向探测和兼容场景的历史行为：导入后默认不校验证书。
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 remove_ssl_verify()
-patch_redirect()
-patch_getproxies()
 
 
 class EnhancedResponse(Response):
@@ -233,29 +245,7 @@ class RequestsSession(requests.Session):
 
 
 class BaseUrlSession(RequestsSession):
-    """A Session with a URL that all requests will use as a base.
-    .. note::
-        The base URL that you provide and the path you provide are **very**
-        important.
-    Let's look at another *similar* example
-    .. code-block:: python
-        >>> from requests_toolbelt import sessions
-        >>> s = sessions.BaseUrlSession(
-        ...     base_url='https://example.com/resource/')
-        >>> r = s.get('/sub-resource/', params={'foo': 'bar'})
-        >>> print(r.request.url)
-        https://example.com/sub-resource/?foo=bar
-    The key difference here is that we called ``get`` with ``/sub-resource/``,
-    i.e., there was a leading ``/``. This changes how we create the URL
-    because we rely on :mod:`urllib.parse.urljoin`.
-    To override how we generate the URL, sub-class this method and override the
-    ``create_url`` method.
-    Based on implementation from
-    https://github.com/kennethreitz/requests/issues/2554#issuecomment-109341010
-
-    作者一直没在requests上加这个功能, urljoin容易有缺陷
-    https://stackoverflow.com/questions/42601812/python-requests-url-base-in-session
-    """
+    """自动把相对请求路径拼接到固定基础 URL 的会话。"""
 
     base_url = None
 
@@ -265,31 +255,33 @@ class BaseUrlSession(RequestsSession):
         super().__init__(debug=debug, rate_limit=rate_limit)
 
     def request(self, method, url, *args, **kwargs):
-        """Send the request after generating the complete URL."""
+        """生成完整 URL 后发送请求。"""
         url = self.create_url(url)
         return super().request(method, url, *args, **kwargs)
 
     def prepare_request(self, request, *args, **kwargs):
-        """Prepare the request after generating the complete URL."""
+        """生成完整 URL 后准备请求。"""
         request.url = self.create_url(request.url)
         return super().prepare_request(request, *args, **kwargs)
 
     def create_url(self, url):
-        """Create the URL based off this partial path."""
+        """将相对路径拼接到基础 URL，并保留基础 URL 的路径部分。"""
         return urljoin(self.base_url.rstrip("/") + "/", url.lstrip("/"))
 
 
 class CustomSslContextHttpAdapter(HTTPAdapter):
     # https://github.com/urllib3/urllib3/issues/2653
     # openssl 3.0 bug --> (Caused by SSLError(SSLError(1, '[SSL: UNSAFE_LEGACY_RENEGOTIATION_DISABLED] unsafe legacy renegotiation disabled (_ssl.c:1006)')))
-    """ "Transport adapter" that allows us to use a custom ssl context object with the requests."""
+    """启用 OpenSSL 旧式服务端连接兼容选项的 HTTPS 适配器。"""
 
-    def init_poolmanager(self, connections, maxsize, block=False):
-        ctx = create_urllib3_context()
-        ctx.load_default_certs()
-        ctx.check_hostname = False  # ValueError: Cannot set verify_mode to CERT_NONE when check_hostname is enabled
-        ctx.options |= 0x4  # ssl.OP_LEGACY_SERVER_CONNECT
-        self.poolmanager = urllib3.PoolManager(ssl_context=ctx)
+    def init_poolmanager(self, connections, maxsize, block=False, **pool_kwargs):
+        self.poolmanager = urllib3.PoolManager(
+            num_pools=connections,
+            maxsize=maxsize,
+            block=block,
+            ssl_context=_create_legacy_ssl_context(),
+            **pool_kwargs,
+        )
 
 
 @dataclass
@@ -414,51 +406,80 @@ class ChunkedConfig:
         return cls(chunk_size_range=(3, 10), delay_range=(0.1, 0.8), comment_length_range=(0, 50), keywords=None)
 
 
-# 保存原始 request 与 send 方法
-_original_request = urllib3.connection.HTTPConnection.request
-_original_send = urllib3.connection.HTTPConnection.send
+class _ChunkedConnectionMixin:
+    """只对当前适配器连接启用 chunked 扩展处理。"""
+
+    def request(self, method, url, body=None, headers=None, **kwargs):
+        transfer_encoding = headers.get("Transfer-Encoding", "") if headers else ""
+        self._custom_chunked = transfer_encoding.lower() == "chunked"
+        return super().request(method, url, body, headers, **kwargs)
+
+    def send(self, data: bytes):
+        if getattr(self, "_custom_chunked", False) and data != b"0\r\n\r\n":
+            chunked_config: Optional[ChunkedConfig] = getattr(
+                _http_context,
+                "chunked_config",
+                None,
+            )
+            if chunked_config and chunked_config.comment_length_range:
+                pattern = re.compile(
+                    rb"^([0-9A-Fa-f]+)\r\n(.*)\r\n$",
+                    re.DOTALL,
+                )
+                match = pattern.match(data)
+                if match:
+                    chunk_header = match.group(1)
+                    chunk_body = match.group(2)
+                    try:
+                        expected_length = int(chunk_header, 16)
+                    except ValueError:
+                        return super().send(data)
+                    if 0 < expected_length == len(chunk_body):
+                        comment_length = random.randint(
+                            *chunked_config.comment_length_range
+                        )
+                        chunk_comment = rand_base(comment_length).encode()
+                        data = (
+                            chunk_header
+                            + b";"
+                            + chunk_comment
+                            + b"\r\n"
+                            + chunk_body
+                            + b"\r\n"
+                        )
+
+        return super().send(data)
 
 
-def custom_urllib3_request(self, method, url, body=None, headers=None, **kwargs):
-    """
-    如果 headers 中包含 Transfer-Encoding: chunked，则在 self 上设置 _custom_chunked 标志
-    """
-    if headers and headers.get("Transfer-Encoding", "").lower() == "chunked":
-        self._custom_chunked = True
-    else:
-        self._custom_chunked = False
-    return _original_request(self, method, url, body, headers, **kwargs)
+class _LegacyTlsConnectionMixin:
+    """为当前 HTTPS 连接保留旧式 TLS 服务端兼容上下文。"""
+
+    def __init__(self, *args, **kwargs):
+        kwargs.setdefault("ssl_context", _create_legacy_ssl_context())
+        super().__init__(*args, **kwargs)
 
 
-def custom_urllib3_send(self, data: bytes):
-    """
-    钩住 send 方法，如果当前连接处于 _custom_chunked 模式，就
-    对数据进行解析，并在发送前插入注释。
-    这里假定数据格式为： b"<hex_length>\r\n<chunk>\r\n"
-    """
-    if getattr(self, "_custom_chunked", False) and data != b"0\r\n\r\n":
-        chunked_config: Optional[ChunkedConfig] = getattr(_http_context, "chunked_config", None)
-        if chunked_config and chunked_config.comment_length_range:
-            # 匹配 chunked 数据格式
-            pattern = re.compile(rb'^([0-9A-Fa-f]+)\r\n(.*)\r\n$', re.DOTALL)
-            match = pattern.match(data)
-            if match:
-                header = match.group(1)  # 十六进制长度部分
-                chunk_body = match.group(2)  # 数据部分
-                try:
-                    expected_length = int(header, 16)
-                except ValueError:
-                    return _original_send(self, data)
-                if 0 < expected_length == len(chunk_body):
-                    length = random.randint(*chunked_config.comment_length_range)
-                    data = header + b';' + rand_base(length).encode() + b"\r\n" + chunk_body + b"\r\n"
-
-    return _original_send(self, data)
+class _ChunkedHTTPConnection(
+    _ChunkedConnectionMixin,
+    urllib3.connection.HTTPConnection,
+):
+    pass
 
 
-# 替换 urllib3.connection.HTTPConnection 的 request 和 send
-urllib3.connection.HTTPConnection.request = custom_urllib3_request
-urllib3.connection.HTTPConnection.send = custom_urllib3_send
+class _ChunkedHTTPSConnection(
+    _ChunkedConnectionMixin,
+    _LegacyTlsConnectionMixin,
+    urllib3.connection.HTTPSConnection,
+):
+    pass
+
+
+class _ChunkedHTTPConnectionPool(urllib3.connectionpool.HTTPConnectionPool):
+    ConnectionCls = _ChunkedHTTPConnection
+
+
+class _ChunkedHTTPSConnectionPool(urllib3.connectionpool.HTTPSConnectionPool):
+    ConnectionCls = _ChunkedHTTPSConnection
 
 
 class ChunkedAdapter(HTTPAdapter):
@@ -485,6 +506,57 @@ class ChunkedAdapter(HTTPAdapter):
         self.chunked_config = chunked_config or ChunkedConfig.default()
         self.debug = debug
         super().__init__(**kwargs)
+
+    @staticmethod
+    @functools.lru_cache(maxsize=None)
+    def _build_chunked_pool_class(pool_class):
+        """基于原连接池派生分块版本，保留 SOCKS 等代理连接能力。"""
+        connection_class = pool_class.ConnectionCls
+        if issubclass(connection_class, _ChunkedConnectionMixin):
+            return pool_class
+
+        connection_bases = [_ChunkedConnectionMixin]
+        if issubclass(connection_class, urllib3.connection.HTTPSConnection):
+            connection_bases.append(_LegacyTlsConnectionMixin)
+        connection_bases.append(connection_class)
+        chunked_connection_class = type(
+            f"Chunked{connection_class.__name__}",
+            tuple(connection_bases),
+            {},
+        )
+        return type(
+            f"Chunked{pool_class.__name__}",
+            (pool_class,),
+            {"ConnectionCls": chunked_connection_class},
+        )
+
+    @classmethod
+    def _configure_pool_classes(cls, pool_manager) -> None:
+        """局部扩展管理器现有连接池，不破坏 HTTP、HTTPS 或 SOCKS 继承关系。"""
+        pool_manager.pool_classes_by_scheme = {
+            scheme: cls._build_chunked_pool_class(pool_class)
+            for scheme, pool_class in pool_manager.pool_classes_by_scheme.items()
+        }
+
+    def init_poolmanager(
+        self,
+        connections,
+        maxsize,
+        block=False,
+        **pool_kwargs,
+    ):
+        self.poolmanager = urllib3.PoolManager(
+            num_pools=connections,
+            maxsize=maxsize,
+            block=block,
+            **pool_kwargs,
+        )
+        self._configure_pool_classes(self.poolmanager)
+
+    def proxy_manager_for(self, proxy, **proxy_kwargs):
+        proxy_manager = super().proxy_manager_for(proxy, **proxy_kwargs)
+        self._configure_pool_classes(proxy_manager)
+        return proxy_manager
 
     def _chunk_generator(self, data: bytes) -> Generator[bytes, None, None]:
         """核心分块生成逻辑"""
@@ -547,6 +619,7 @@ class ChunkedAdapter(HTTPAdapter):
 
     def send(self, request, **kwargs):
         """处理分块传输请求"""
+        context_was_set = False
         if request.body and not isinstance(request.body, Generator):
             # 数据预处理
             data = request.body.encode() if isinstance(request.body, str) else bytes(request.body)
@@ -559,26 +632,30 @@ class ChunkedAdapter(HTTPAdapter):
                 del request.headers['Content-Length']
 
             _http_context.chunked_config = self.chunked_config
+            context_was_set = True
 
-        result = super().send(request, **kwargs)
-        del _http_context.chunked_config
-        return result
+        try:
+            return super().send(request, **kwargs)
+        finally:
+            if context_was_set:
+                vars(_http_context).pop("chunked_config", None)
 
 
 def requests_session(
-    proxies: Union[Dict[str, str], int, None] = False,
+    proxies: Union[Dict[str, str], int, str, None] = False,
     timeout: Optional[float] = None,
     debug: bool = False,
     base_url: Optional[str] = None,
     user_agent: Optional[str] = None,
     use_cache: Union[bool, Dict[str, Any], None] = None,
-    fake_ip: bool = False,
+    fake_ip: bool | str = False,
     rate_limit: Optional[int] = None,
     chunked: Union[bool, ChunkedConfig] = False,
     max_retries: int = requests.adapters.DEFAULT_RETRIES,
     pool_connections: int = requests.adapters.DEFAULT_POOLSIZE,
     pool_maxsize: int = requests.adapters.DEFAULT_POOLSIZE,
-) -> RequestsSession:
+    verify: bool | str = False,
+) -> requests.Session:
     """
     创建并返回一个增强的 requests session。
 
@@ -595,6 +672,7 @@ def requests_session(
         chunked: 是否启用分块传输，可以是 bool 或 ChunkedConfig 对象。如果为 True，使用默认配置；如果为 ChunkedConfig，使用自定义配置。
         pool_connections: 连接池最大连接数。默认 10。
         pool_maxsize: 连接池最大连接数。默认 10。
+        verify: 是否校验 TLS 证书，或 CA 证书路径。默认 False。
 
     Returns:
         一个根据配置生成的 session 对象（CachedSession, BaseUrlSession 或 RequestsSession）。
@@ -613,6 +691,8 @@ def requests_session(
         session = BaseUrlSession(base_url, debug=debug, rate_limit=rate_limit)
     else:
         session = RequestsSession(debug=debug, rate_limit=rate_limit)
+
+    session.get_redirect_target = get_redirect_target.__get__(session, type(session))
 
     ua = UserAgent()
     session.headers.update(
@@ -637,7 +717,7 @@ def requests_session(
                 'Forwarded': f'for={fake_ip}',
             }
         )
-    session.verify = False
+    session.verify = verify
     session.mount(
         'http://', HTTPAdapter(max_retries=max_retries, pool_connections=pool_connections, pool_maxsize=pool_maxsize)
     )
@@ -716,6 +796,7 @@ class DESAdapter(HTTPAdapter):
     def proxy_manager_for(self, *args, **kwargs):
         context = create_urllib3_context(ciphers=self.COPHERS)
         kwargs["ssl_context"] = context
+        return super().proxy_manager_for(*args, **kwargs)
 
 
 def httpraw(raw: str, ssl: bool = False, **kwargs: Any) -> requests.Response:
@@ -729,53 +810,48 @@ def httpraw(raw: str, ssl: bool = False, **kwargs: Any) -> requests.Response:
     :param kwargs:支持对requests中的参数进行设置
     :return:requests.Response
     """
-    raw = raw.strip()
-    # Clear up unnecessary spaces
-    raws = list(map(lambda x: x.strip(), raw.splitlines()))
+    if not isinstance(raw, str):
+        raise TypeError("raw must be a string")
+
+    normalized_raw = raw.replace("\r\n", "\n").lstrip("\n")
+    header_section, separator, request_body = normalized_raw.partition("\n\n")
+    header_lines = header_section.splitlines()
     try:
-        method, path, protocol = raws[0].split(" ")
+        method, path, protocol = header_lines[0].strip().split()
     except (ValueError, IndexError):
         raise ValueError("Invalid protocol format: first line must be 'METHOD PATH PROTOCOL'")
-    post = None
-    _json = None
-    if method.upper() == "POST":
-        index = 0
-        for i in raws:
-            index += 1
-            if i.strip() == "":
-                break
-        if len(raws) == index:
-            raise Exception("Invalid protocol format: no post data")
-        tmp_headers = raws[1 : index - 1]
-        tmp_headers = extract_dict('\n'.join(tmp_headers), '\n', ": ")
-        postData = '\r\n'.join(raws[index:])
+
+    if not protocol.upper().startswith("HTTP/"):
+        raise ValueError("Invalid protocol format: protocol must start with HTTP/")
+
+    request_headers = extract_dict(
+        "\n".join(line.strip() for line in header_lines[1:]),
+        "\n",
+        ": ",
+    )
+    post_data = None
+    json_data = None
+    if method.upper() in {"POST", "PUT", "PATCH"} and separator:
         try:
-            json.loads(postData)
-            _json = postData
+            json_data = json.loads(request_body)
         except ValueError:
-            post = postData
-    else:
-        tmp_headers = extract_dict('\n'.join(raws[1:]), '\n', ": ")
+            post_data = request_body
+
     netloc = "http" if not ssl else "https"
-    host = tmp_headers.get("Host", None)
+    host = request_headers.get("Host")
     if host is None:
         raise ValueError("Missing required 'Host' header in raw request")
-    del tmp_headers["Host"]
-    if 'Content-Length' in tmp_headers:
-        del tmp_headers['Content-Length']
+    del request_headers["Host"]
+    request_headers.pop("Content-Length", None)
     url = "{0}://{1}".format(netloc, host + path)
 
     kwargs.setdefault('allow_redirects', True)
-    kwargs.setdefault('data', post)
-    kwargs.setdefault('headers', tmp_headers)
-    kwargs.setdefault('json', _json)
+    kwargs.setdefault('data', post_data)
+    kwargs.setdefault('headers', request_headers)
+    kwargs.setdefault('json', json_data)
 
     with requests_session() as session:
         return session.request(method=method, url=url, **kwargs)
-
-
-requests.httpraw = httpraw
-
 
 def is_private_ip(ip_str: str) -> bool:
     """
@@ -801,12 +877,8 @@ def is_internal_url(url: str) -> bool:
     """
     判断URL是否是内网IP对应的URL
     """
-    # 提取URL中的IP地址
     parsed_url = urlparse(url)
-    netloc = parsed_url.netloc.split(':')[0]
-    ip = netloc if netloc else parsed_url.hostname
-    # 判断IP地址是否是内网IP
-    return is_private_ip(ip)
+    return is_private_ip(parsed_url.hostname or "")
 
 
 def is_wildcard_dns(domain: str) -> bool:

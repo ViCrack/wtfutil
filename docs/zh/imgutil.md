@@ -3,7 +3,7 @@
 随机头像拉取（多源回退）、`img_config`。
 
 ```python
-from wtfutil import random_avatar_bytes, img_config
+from wtfutil.imgutil import img_config, random_avatar_bytes
 ```
 
 ## 符号
@@ -17,6 +17,8 @@ from wtfutil import random_avatar_bytes, img_config
 
 内置源（直链/302）：loliapi、dmoe、xjh、btstu、horosama；配置 `APIHZ_IMG_ID` + `APIHZ_IMG_KEY` 时增加 apihz。
 
+响应必须为 HTTP 200、至少 256 字节，并通过 `Content-Type` 或 PNG/JPEG/GIF/WebP 文件签名确认是图片。HTML 错误页、限流页会被拒绝并继续尝试下一个来源。
+
 ## 配置键
 
 | 键 | 说明 |
@@ -29,7 +31,7 @@ from wtfutil import random_avatar_bytes, img_config
 查找路径与 `get_resource("wtfconfig.ini")` 一致。
 
 ```python
-from wtfutil import random_avatar_bytes
+from wtfutil.imgutil import random_avatar_bytes
 
 data = random_avatar_bytes()
 ```

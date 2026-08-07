@@ -9,8 +9,10 @@ from __future__ import annotations
 
 from typing import Any
 
+from requests import Session
+
 from .configutil import ensure_section
-from .httputil import RequestsSession, requests_session
+from .httputil import requests_session
 
 DEFAULT_BASE_URL = "https://party.mem.mk"
 
@@ -467,7 +469,7 @@ class MemShellParty:
         self,
         base_url: str | None = None,
         timeout: float = 60,
-        session: RequestsSession | None = None,
+        session: Session | None = None,
     ) -> None:
         """
         :param base_url: 服务根地址，默认 https://party.mem.mk

@@ -1,7 +1,7 @@
 """memshellutil / memshell CLI 测试。
 
-默认含 mock 单测；另含访问 https://party.mem.mk 的联调用例。
-若需跳过联调：设置环境变量 MEMSHELL_SKIP_LIVE=1。
+默认只运行 mock 单测。设置 ``MEMSHELL_RUN_LIVE=1`` 后才运行访问
+``https://party.mem.mk`` 的联调用例。
 """
 
 from __future__ import annotations
@@ -24,7 +24,11 @@ from wtfutil.memshellutil import (
     resolve_shell_credentials,
 )
 
-_SKIP_LIVE = os.getenv("MEMSHELL_SKIP_LIVE", "").strip() in ("1", "true", "yes")
+_RUN_LIVE = os.getenv("MEMSHELL_RUN_LIVE", "").strip().lower() in {
+    "1",
+    "true",
+    "yes",
+}
 
 
 def _fake_resp(data, status_code: int = 200):
@@ -457,7 +461,7 @@ class TestMemshellCli(unittest.TestCase):
         self.assertEqual(code, 2)
 
 
-@unittest.skipIf(_SKIP_LIVE, "MEMSHELL_SKIP_LIVE=1")
+@unittest.skipUnless(_RUN_LIVE, "设置 MEMSHELL_RUN_LIVE=1 以运行外部联调")
 class TestMemShellPartyLive(unittest.TestCase):
     """访问真实 MemShellParty 服务（默认 https://party.mem.mk）。"""
 
@@ -491,8 +495,7 @@ class TestMemShellPartyLive(unittest.TestCase):
         self.assertTrue(mem.get("shellClassName"))
         self.assertTrue(mem.get("injectorClassName"))
         tool = mem.get("shellToolConfig") or {}
-        # 服务端可能回写 pass 字段
-        self.assertTrue(tool.get("pass") or tool.get("behinderPass") or True)
+        self.assertIsInstance(tool, dict)
 
     def test_live_cli_generate_to_file(self):
         with tempfile.TemporaryDirectory() as td:

@@ -4,21 +4,51 @@ import sqlite3
 import threading
 import time
 import uuid
-import weakref
 from abc import ABC, abstractmethod
 from contextlib import closing
+from functools import wraps
 from typing import List, Dict, Union, Optional, Any
 
 from pymysql import connect as pymysql_connect, cursors
 
-# 日志配置
 logger = logging.getLogger(__name__)
-logger.setLevel(logging.INFO)
-handler = logging.StreamHandler()
-handler.setLevel(logging.INFO)
-formatter = logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s", datefmt="%Y-%m-%d %H:%M:%S")
-handler.setFormatter(formatter)
-logger.addHandler(handler)
+
+
+def _prepare_record_batch(
+    records: List[Dict[str, Any]],
+) -> tuple[list[str], list[tuple[Any, ...]]]:
+    """校验批量记录字段一致，并按首条记录的列顺序构建参数。"""
+    if not isinstance(records, list) or not records:
+        raise TypeError("Records must be a non-empty list of dictionaries")
+    if not isinstance(records[0], dict) or not records[0]:
+        raise TypeError("Each record must be a non-empty dictionary")
+
+    column_names = list(records[0].keys())
+    expected_columns = set(column_names)
+    values: list[tuple[Any, ...]] = []
+
+    for record_index, record in enumerate(records):
+        if not isinstance(record, dict) or not record:
+            raise TypeError(
+                f"Record at index {record_index} must be a non-empty dictionary"
+            )
+        if set(record.keys()) != expected_columns:
+            raise ValueError(
+                f"Record at index {record_index} has inconsistent columns"
+            )
+        values.append(tuple(record[column_name] for column_name in column_names))
+
+    return column_names, values
+
+
+def _serialize_sqlite_operation(function):
+    """串行化同一 SQLite 实例的操作，使 ``close`` 不会中途关闭连接。"""
+    @wraps(function)
+    def wrapper(database, *args, **kwargs):
+        with database._operation_lock:
+            return function(database, *args, **kwargs)
+
+    return wrapper
 
 
 class ScriptRunner:
@@ -28,6 +58,7 @@ class ScriptRunner:
         self.autocommit = autocommit
 
     def run_script(self, sql: str) -> None:
+        """按当前分隔符拆分并执行 SQL 脚本。"""
         try:
             script = ""
             for line in sql.splitlines():
@@ -43,23 +74,28 @@ class ScriptRunner:
                     if strip_line.endswith(self.delimiter):
                         if self.delimiter == "$$":
                             script = script[:-1].rstrip("$") + ";"
-                        cursor = self.connection.cursor()
-                        print(script)
-                        cursor.execute(script)
+                        with closing(self.connection.cursor()) as cursor:
+                            logger.debug("SQL script statement: %s", script)
+                            cursor.execute(script)
                         script = ""
             if script.strip():
-                raise Exception("Line missing end-of-line terminator (" + self.delimiter + ") => " + script)
-            if not self.connection.get_autocommit():
+                raise ValueError(
+                    "Line missing end-of-line terminator ("
+                    + self.delimiter
+                    + ") => "
+                    + script
+                )
+            if self.autocommit:
                 self.connection.commit()
         except Exception:
-            if not self.connection.get_autocommit():
+            if self.autocommit:
                 self.connection.rollback()
             raise
 
 
 class Dict(dict):
     """
-    Simple dict but support access as x.y style.
+    支持通过 ``value.key`` 形式访问键值的字典。
     >>> d1 = Dict()
     >>> d1['x'] = 100
     >>> d1.x
@@ -105,9 +141,10 @@ class Dict(dict):
 
 def next_id(t: float | None = None) -> str:
     """
-    Return next id as 50-char string.
+    生成由毫秒时间戳和 UUID 组成的 50 位 ID。
+
     Args:
-        t: unix timestamp, default to None and using time.time().
+        t: Unix 时间戳；默认使用 ``time.time()``。
     """
     if t is None:
         t = time.time()
@@ -304,15 +341,36 @@ class SQLite(Database):
     - 命名参数：db.execute("SELECT * FROM users WHERE id = :id", id=1)
     """
 
-    _thread_local = threading.local()
-
     def __init__(self, db_file: str):
         self.db_file = db_file
+        self._connection_target = db_file
+        self._connection_uses_uri = False
+        if db_file == ":memory:":
+            self._connection_target = (
+                f"file:wtfutil-{uuid.uuid4().hex}?mode=memory&cache=shared"
+            )
+            self._connection_uses_uri = True
+        self._thread_local = threading.local()
+        self._connections: set[sqlite3.Connection] = set()
+        self._connections_lock = threading.Lock()
+        self._operation_lock = threading.RLock()
+        self._connection_generation = 0
 
     def _get_connection(self) -> sqlite3.Connection:
-        if not hasattr(self._thread_local, "conn"):
-            self._thread_local.conn = sqlite3.connect(self.db_file)
-            weakref.finalize(self._thread_local, self.close)
+        thread_generation = getattr(self._thread_local, "generation", -1)
+        if (
+            not hasattr(self._thread_local, "conn")
+            or thread_generation != self._connection_generation
+        ):
+            connection = sqlite3.connect(
+                self._connection_target,
+                check_same_thread=False,
+                uri=self._connection_uses_uri,
+            )
+            with self._connections_lock:
+                self._connections.add(connection)
+            self._thread_local.conn = connection
+            self._thread_local.generation = self._connection_generation
         return self._thread_local.conn
 
     def _build_where_clause(self, where_clause: Union[Dict[str, Any], str, None], params: List[Any]) -> str:
@@ -325,17 +383,18 @@ class SQLite(Database):
             return where
         return where_clause
 
+    @_serialize_sqlite_operation
     def insert(self, table: str, record: Dict[str, Any]) -> int:
         if not table:
             raise ValueError("Table name cannot be empty")
-        if not isinstance(record, dict):
-            raise TypeError("Record must be a dictionary")
+        if not isinstance(record, dict) or not record:
+            raise TypeError("Record must be a non-empty dictionary")
         conn = self._get_connection()
         try:
             with conn:
                 with closing(conn.cursor()) as cursor:
                     columns = ", ".join(f"`{k}`" for k in record.keys())
-                    placeholders = ", ".join("?" * len(record))
+                    placeholders = ", ".join(["?"] * len(record))
                     sql = f"INSERT OR IGNORE INTO {table} ({columns}) VALUES ({placeholders})"
                     logger.debug(f"SQL: {sql} -- Params: {tuple(record.values())}")
                     cursor.execute(sql, tuple(record.values()))
@@ -344,17 +403,18 @@ class SQLite(Database):
             logger.error(f"Error in insert: {e}")
             raise
 
+    @_serialize_sqlite_operation
     def insert_or_replace(self, table: str, record: Dict[str, Any]) -> int:
         if not table:
             raise ValueError("Table name cannot be empty")
-        if not isinstance(record, dict):
-            raise TypeError("Record must be a dictionary")
+        if not isinstance(record, dict) or not record:
+            raise TypeError("Record must be a non-empty dictionary")
         conn = self._get_connection()
         try:
             with conn:
                 with closing(conn.cursor()) as cursor:
                     columns = ", ".join(f"`{k}`" for k in record.keys())
-                    placeholders = ", ".join("?" * len(record))
+                    placeholders = ", ".join(["?"] * len(record))
                     sql = f"INSERT OR REPLACE INTO {table} ({columns}) VALUES ({placeholders})"
                     logger.debug(f"SQL: {sql} -- Params: {tuple(record.values())}")
                     cursor.execute(sql, tuple(record.values()))
@@ -363,19 +423,18 @@ class SQLite(Database):
             logger.error(f"Error in insert_or_replace: {e}")
             raise
 
+    @_serialize_sqlite_operation
     def insert_many(self, table: str, records: List[Dict[str, Any]]) -> int:
         if not table:
             raise ValueError("Table name cannot be empty")
-        if not isinstance(records, list) or not records:
-            raise TypeError("Records must be a non-empty list of dictionaries")
+        column_names, values = _prepare_record_batch(records)
         conn = self._get_connection()
         try:
             with conn:
                 with closing(conn.cursor()) as cursor:
-                    columns = ", ".join(f"`{k}`" for k in records[0].keys())
-                    placeholders = ", ".join("?" * len(records[0]))
+                    columns = ", ".join(f"`{column_name}`" for column_name in column_names)
+                    placeholders = ", ".join(["?"] * len(column_names))
                     sql = f"INSERT OR IGNORE INTO {table} ({columns}) VALUES ({placeholders})"
-                    values = [tuple(record.values()) for record in records]
                     logger.debug(f"SQL: {sql} -- Params: {values}")
                     cursor.executemany(sql, values)
                     return cursor.lastrowid
@@ -383,11 +442,12 @@ class SQLite(Database):
             logger.error(f"Error in insert_many: {e}")
             raise
 
+    @_serialize_sqlite_operation
     def update(self, table: str, record: Dict[str, Any], where_clause: Union[Dict[str, Any], str, None] = None) -> int:
         if not table:
             raise ValueError("Table name cannot be empty")
-        if not isinstance(record, dict):
-            raise TypeError("Record must be a dictionary")
+        if not isinstance(record, dict) or not record:
+            raise TypeError("Record must be a non-empty dictionary")
         conn = self._get_connection()
         try:
             with conn:
@@ -404,6 +464,7 @@ class SQLite(Database):
             logger.error(f"Error in update: {e}")
             raise
 
+    @_serialize_sqlite_operation
     def delete(self, table: str, where_clause: Union[Dict[str, Any], str, None] = None, limit: Optional[int] = None) -> int:
         if not table:
             raise ValueError("Table name cannot be empty")
@@ -422,6 +483,7 @@ class SQLite(Database):
             logger.error(f"Error in delete: {e}")
             raise
 
+    @_serialize_sqlite_operation
     def count(self, table: str, where_clause: Union[Dict[str, Any], str, None] = None) -> int:
         if not table:
             raise ValueError("Table name cannot be empty")
@@ -439,10 +501,12 @@ class SQLite(Database):
             logger.error(f"Error in count: {e}")
             raise
 
+    @_serialize_sqlite_operation
     def select(self, table: str, columns: Union[List[str], str, None] = None, where_clause: Union[Dict[str, Any], str, None] = None,
                order: Optional[str] = None, limit: Optional[int] = None) -> List[Dict[str, Any]]:
         return self._select(table, columns, where_clause, order, limit, fetchone=False)
 
+    @_serialize_sqlite_operation
     def select_one(self, table: str, columns: Union[List[str], str, None] = None, where_clause: Union[Dict[str, Any], str, None] = None,
                    order: Optional[str] = None, limit: Optional[int] = None) -> Optional[Dict[str, Any]]:
         return self._select(table, columns, where_clause, order, limit, fetchone=True)
@@ -474,6 +538,7 @@ class SQLite(Database):
             logger.error(f"Error in select: {e}")
             raise
 
+    @_serialize_sqlite_operation
     def execute(self, sql: str, *params, **kwargs) -> int:
         """执行自定义 SQL，返回 lastrowid
 
@@ -495,6 +560,7 @@ class SQLite(Database):
             logger.error(f"Error in execute: {e}")
             raise
 
+    @_serialize_sqlite_operation
     def query(self, sql: str, *params, **kwargs) -> List[Dict[str, Any]]:
         """执行自定义查询，返回多条记录
 
@@ -518,6 +584,7 @@ class SQLite(Database):
             logger.error(f"Error in query: {e}")
             raise
 
+    @_serialize_sqlite_operation
     def get(self, sql: str, *params, **kwargs) -> Optional[Dict[str, Any]]:
         """执行自定义查询，返回单条记录
 
@@ -542,10 +609,22 @@ class SQLite(Database):
             raise
 
     def close(self):
-        conn = getattr(self._thread_local, "conn", None)
-        if conn:
-            conn.close()
-            del self._thread_local.conn
+        with self._operation_lock:
+            with self._connections_lock:
+                connections = list(self._connections)
+                self._connections.clear()
+                self._connection_generation += 1
+
+            for connection in connections:
+                try:
+                    connection.close()
+                except sqlite3.Error:
+                    logger.debug("关闭 SQLite 连接失败", exc_info=True)
+
+            if hasattr(self._thread_local, "conn"):
+                del self._thread_local.conn
+            if hasattr(self._thread_local, "generation"):
+                del self._thread_local.generation
 
     def __del__(self):
         self.close()
@@ -559,7 +638,7 @@ class MYSQL(Database):
     - 命名参数：db.execute("SELECT * FROM users WHERE id = %(id)s", id=1)
     """
 
-    def __init__(self, host: str, user: str, password: str, database: str, charset: str = "utf8mb4", port: int = 3306, ssl=None):
+    def __init__(self, host: str, user: str, password: str, database: str, charset: str = "utf8mb4", port: int = 3306, ssl=None, autocommit: bool = True):
         self.host = host
         self.user = user
         self.password = password
@@ -567,6 +646,7 @@ class MYSQL(Database):
         self.charset = charset
         self.port = int(port)
         self.ssl = ssl
+        self.autocommit = autocommit
         self.connection = None
         self.closed = False
 
@@ -576,7 +656,8 @@ class MYSQL(Database):
                 host=self.host, user=self.user, password=self.password,
                 database=self.database, charset=self.charset, port=self.port,
                 cursorclass=cursors.DictCursor,
-                ssl=self.ssl
+                ssl=self.ssl,
+                autocommit=self.autocommit,
             )
             self.closed = False
         return self.connection
@@ -593,27 +674,30 @@ class MYSQL(Database):
     def insert(self, table: str, record: Dict[str, Any]) -> int:
         if not table:
             raise ValueError("Table name cannot be empty")
-        if not isinstance(record, dict):
-            raise TypeError("Record must be a dictionary")
+        if not isinstance(record, dict) or not record:
+            raise TypeError("Record must be a non-empty dictionary")
         conn = self._get_connection()
         try:
             with conn.cursor() as cursor:
                 columns = ", ".join(f"`{k}`" for k in record.keys())
-                placeholders = ", ".join("%s" * len(record))
+                placeholders = ", ".join(["%s"] * len(record))
                 sql = f"INSERT IGNORE INTO {table} ({columns}) VALUES ({placeholders})"
                 logger.debug(f"SQL: {sql} -- Params: {tuple(record.values())}")
                 cursor.execute(sql, tuple(record.values()))
-                conn.commit()
+                if self.autocommit:
+                    conn.commit()
                 return cursor.lastrowid
         except Exception as e:
+            if self.autocommit:
+                conn.rollback()
             logger.error(f"Error in insert: {e}")
             raise
 
     def insert_or_replace(self, table: str, record: Dict[str, Any]) -> int:
         if not table:
             raise ValueError("Table name cannot be empty")
-        if not isinstance(record, dict):
-            raise TypeError("Record must be a dictionary")
+        if not isinstance(record, dict) or not record:
+            raise TypeError("Record must be a non-empty dictionary")
         conn = self._get_connection()
         try:
             with conn.cursor() as cursor:
@@ -621,37 +705,41 @@ class MYSQL(Database):
                 sql = f"REPLACE INTO {table} SET {set_clause}"
                 logger.debug(f"SQL: {sql} -- Params: {tuple(record.values())}")
                 cursor.execute(sql, tuple(record.values()))
-                conn.commit()
+                if self.autocommit:
+                    conn.commit()
                 return cursor.lastrowid
         except Exception as e:
+            if self.autocommit:
+                conn.rollback()
             logger.error(f"Error in insert_or_replace: {e}")
             raise
 
     def insert_many(self, table: str, records: List[Dict[str, Any]]) -> int:
         if not table:
             raise ValueError("Table name cannot be empty")
-        if not isinstance(records, list) or not records:
-            raise TypeError("Records must be a non-empty list of dictionaries")
+        column_names, values = _prepare_record_batch(records)
         conn = self._get_connection()
         try:
             with conn.cursor() as cursor:
-                columns = ", ".join(f"`{k}`" for k in records[0].keys())
-                placeholders = ", ".join("%s" * len(records[0]))
+                columns = ", ".join(f"`{column_name}`" for column_name in column_names)
+                placeholders = ", ".join(["%s"] * len(column_names))
                 sql = f"INSERT IGNORE INTO {table} ({columns}) VALUES ({placeholders})"
-                values = [tuple(record.values()) for record in records]
                 logger.debug(f"SQL: {sql} -- Params: {values}")
                 cursor.executemany(sql, values)
-                conn.commit()
+                if self.autocommit:
+                    conn.commit()
                 return cursor.lastrowid
         except Exception as e:
+            if self.autocommit:
+                conn.rollback()
             logger.error(f"Error in insert_many: {e}")
             raise
 
     def update(self, table: str, record: Dict[str, Any], where_clause: Union[Dict[str, Any], str, None] = None) -> int:
         if not table:
             raise ValueError("Table name cannot be empty")
-        if not isinstance(record, dict):
-            raise TypeError("Record must be a dictionary")
+        if not isinstance(record, dict) or not record:
+            raise TypeError("Record must be a non-empty dictionary")
         conn = self._get_connection()
         try:
             with conn.cursor() as cursor:
@@ -662,9 +750,12 @@ class MYSQL(Database):
                 sql = f"UPDATE IGNORE {table} SET {set_clause} WHERE {where}"
                 logger.debug(f"SQL: {sql} -- Params: {tuple(params)}")
                 cursor.execute(sql, tuple(params))
-                conn.commit()
+                if self.autocommit:
+                    conn.commit()
                 return cursor.rowcount
         except Exception as e:
+            if self.autocommit:
+                conn.rollback()
             logger.error(f"Error in update: {e}")
             raise
 
@@ -680,9 +771,12 @@ class MYSQL(Database):
                 sql = f"DELETE FROM {table} WHERE {where} {limits}"
                 logger.debug(f"SQL: {sql} -- Params: {tuple(params)}")
                 cursor.execute(sql, tuple(params))
-                conn.commit()
+                if self.autocommit:
+                    conn.commit()
                 return cursor.rowcount
         except Exception as e:
+            if self.autocommit:
+                conn.rollback()
             logger.error(f"Error in delete: {e}")
             raise
 
@@ -748,9 +842,12 @@ class MYSQL(Database):
                 args = params or kwargs
                 logger.debug(f"SQL: {sql} -- Params: {args if args else 'None'}")
                 cursor.execute(sql, args)
-                conn.commit()
+                if self.autocommit:
+                    conn.commit()
                 return cursor.lastrowid
         except Exception as e:
+            if self.autocommit:
+                conn.rollback()
             logger.error(f"Error in execute: {e}")
             raise
 
@@ -793,6 +890,14 @@ class MYSQL(Database):
         except Exception as e:
             logger.error(f"Error in get: {e}")
             raise
+
+    def commit(self) -> None:
+        """提交由 ``autocommit=False`` 调用方管理的事务。"""
+        self._get_connection().commit()
+
+    def rollback(self) -> None:
+        """回滚由 ``autocommit=False`` 调用方管理的事务。"""
+        self._get_connection().rollback()
 
     def close(self):
         if self.connection and not self.closed:

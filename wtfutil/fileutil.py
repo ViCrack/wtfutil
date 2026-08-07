@@ -10,29 +10,32 @@ from typing import Optional
 from typing import Union
 
 
+def _calculate_file_hash(file_path: str | Path, algorithm: str) -> str:
+    """分块读取文件并计算摘要，避免一次性把大文件读入内存。"""
+    digest = hashlib.new(algorithm)
+    with open(file_path, "rb") as file_handle:
+        for chunk in iter(lambda: file_handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
 def file_md5(file_path: str | Path) -> str:
-    md5lib = hashlib.md5()
-    with open(str(file_path), 'rb') as f:
-        md5lib.update(f.read())
-    return md5lib.hexdigest()
+    """计算文件的 MD5 摘要。"""
+    return _calculate_file_hash(file_path, "md5")
 
 
 def file_sha1(file_path: str | Path) -> str:
-    sha1 = hashlib.sha1()
-    with open(str(file_path), 'rb') as f:
-        sha1.update(f.read())
-    return sha1.hexdigest()
+    """计算文件的 SHA-1 摘要。"""
+    return _calculate_file_hash(file_path, "sha1")
 
 
 def file_sha256(file_path: str | Path) -> str:
-    sha1 = hashlib.sha256()
-    with open(str(file_path), 'rb') as f:
-        sha1.update(f.read())
-    return sha1.hexdigest()
+    """计算文件的 SHA-256 摘要。"""
+    return _calculate_file_hash(file_path, "sha256")
 
 
 def list_files(directory: str | Path) -> list[str]:
-    """List all files in a directory."""
+    """列出目录中的直接子文件。"""
     directory_str = str(directory)
     return [
         os.path.join(directory_str, f)
@@ -42,7 +45,7 @@ def list_files(directory: str | Path) -> list[str]:
 
 
 def list_directories(directory: str | Path) -> list[str]:
-    """List all directories in a directory."""
+    """列出目录中的直接子目录。"""
     directory_str = str(directory)
     return [
         os.path.join(directory_str, d)
@@ -55,7 +58,13 @@ def touch(filepath: str | Path, mode: int = 0o666, exist_ok: bool = True) -> Non
     Path(filepath).touch(mode=mode, exist_ok=exist_ok)
 
 
-def read_text(filepath: Union[Path, str], mode='r', encoding='utf-8', not_exists_ok: bool = False, errors=None) -> str:
+def read_text(
+    filepath: Union[Path, str],
+    mode: str = "r",
+    encoding: str = "utf-8",
+    not_exists_ok: bool = False,
+    errors: str | None = None,
+) -> str | bytes:
     """
     errors-->
     'ignore'：忽略无法解码的字符。直接跳过无法处理的字符，继续解码其他部分。
@@ -67,10 +76,12 @@ def read_text(filepath: Union[Path, str], mode='r', encoding='utf-8', not_exists
     """
     if isinstance(filepath, Path):
         filepath = str(filepath)
-    if mode == 'rb':
+    binary_mode = "b" in mode
+    if binary_mode:
         encoding = None
+        errors = None
     if not_exists_ok and not Path(filepath).is_file():
-        return ''
+        return b"" if binary_mode else ""
     with open(filepath, mode, encoding=encoding, errors=errors) as f:
         content = f.read()
     return content
@@ -91,17 +102,20 @@ def read_lines(filepath: Union[Path, str], encoding='utf-8', not_exists_ok: bool
     lines = []
     if not_exists_ok and not Path(filepath).is_file():
         return lines
+    seen_lines: set[str] = set()
     with open(filepath, 'r', encoding=encoding) as f:
         # lines = f.readlines()
         # lines = [line.rstrip() for line in lines]  只会创建一个生成器 不会有性能问题
         for line in f:
             line = line.rstrip()
             if line:
-                if unique and line in lines:
+                if unique and line in seen_lines:
                     # 去重
                     continue
 
                 lines.append(line)
+                if unique:
+                    seen_lines.add(line)
     return lines
 
 
@@ -128,7 +142,7 @@ def write_text(filepath: Union[Path, str], content, mode='w', encoding='utf-8', 
     """
     if isinstance(filepath, Path):
         filepath = str(filepath)
-    if mode == 'wb':
+    if 'b' in mode:
         encoding = None
         newline = None  # 二进制模式下 newline 无效
     if content is None:
@@ -326,7 +340,11 @@ class JarAnalyzer:
             with TemporaryDirectory() as temp_dir:
                 output = subprocess.run(
                     ["javap", "-classpath", str(self.jar_path), "-s", main_class],
-                    capture_output=True, text=True, check=True, cwd=temp_dir
+                    capture_output=True,
+                    text=True,
+                    check=True,
+                    cwd=temp_dir,
+                    timeout=30,
                 )
                 stdout = output.stdout
                 if any(indicator in stdout for indicator in self.GUI_INDICATORS):
@@ -334,7 +352,7 @@ class JarAnalyzer:
                 # 额外检查是否有 CLI 相关标志
                 elif "main([Ljava/lang/String;)V" in stdout and "java/io/Console" not in stdout:
                     self.recommended_executable = "java"
-        except subprocess.CalledProcessError:
+        except (OSError, subprocess.CalledProcessError, subprocess.TimeoutExpired):
             # 如果 javap 失败，尝试检查 JAR 中的依赖
             try:
                 with zipfile.ZipFile(self.jar_path, 'r') as jar:

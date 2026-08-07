@@ -27,6 +27,8 @@ from .procutil import (
     list_all_python_process_details,
 )
 
+__all__ = ["main"]
+
 console = Console()
 
 

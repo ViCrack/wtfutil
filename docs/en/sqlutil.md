@@ -3,7 +3,7 @@
 `SQLite` / `MySQL` wrappers, `Database` abstraction, `ScriptRunner`, SQL helpers.
 
 ```python
-from wtfutil import SQLite, MYSQL, next_id
+from wtfutil.sqlutil import MYSQL, SQLite, next_id
 ```
 
 ## Examples
@@ -11,7 +11,7 @@ from wtfutil import SQLite, MYSQL, next_id
 ### SQLite: schema and CRUD
 
 ```python
-from wtfutil import SQLite, next_id
+from wtfutil.sqlutil import SQLite, next_id
 
 db = SQLite("data.db")
 db.execute("""
@@ -50,6 +50,17 @@ db.get("SELECT * FROM items WHERE id = ?", item_id)
 ```python
 db = MYSQL(host="127.0.0.1", user="root", password="pass", database="mydb")
 db.insert_or_replace("items", {"id": "x1", "url": "https://d.com", "status": 0})
+
+# Disable automatic commits when the caller owns transaction boundaries.
+transactional_db = MYSQL(
+    host="127.0.0.1",
+    user="root",
+    password="pass",
+    database="mydb",
+    autocommit=False,
+)
+transactional_db.insert("items", {"id": "x2", "url": "https://e.com"})
+transactional_db.commit()
 ```
 
 ## Classes
@@ -72,5 +83,11 @@ db.insert_or_replace("items", {"id": "x1", "url": "https://d.com", "status": 0})
 | `count`, `record_exists` | Count / exists |
 | `execute`, `query`, `get` | Raw SQL |
 | `close` | Close connection |
+
+Each `SQLite` instance owns its own thread-local connections, and its public operations are serialized so `close()` waits for an active operation before closing worker-thread connections. `SQLite(":memory:")` uses an instance-specific shared-memory URI, so threads on the same instance see the same data. `insert_many` binds every row according to the first record's column order and raises `ValueError` when column sets differ. MySQL write failures roll back before re-raising. The module does not install logging handlers; applications control logging configuration.
+
+`MYSQL(..., autocommit=True)` is the default and prevents read-only calls from retaining implicit transactions. Set it to `False` to manage transaction boundaries yourself with `commit()` and `rollback()`.
+
+`ScriptRunner(..., autocommit=True)` commits the completed script and rolls back on failure; `autocommit=False` leaves transaction ownership to the caller. Each statement cursor is closed immediately after execution.
 
 See source docstrings for placeholders and return types.

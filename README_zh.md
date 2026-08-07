@@ -3,7 +3,7 @@
 <a href="https://pypi.python.org/pypi/wtfutil"><img src="https://img.shields.io/pypi/v/wtfutil.svg"></a>
 <a href="https://pypi.python.org/pypi/wtfutil"><img src="https://img.shields.io/pypi/pyversions/wtfutil.svg"></a>
 
-**wtfutil** 是一个面向日常脚本与自动化任务的 Python 工具库，把最常用的那些"轮子"都封装好：增强型 HTTP 会话、文件读写、编码/加解密、SQLite/MySQL、Windows 进程管理、多通道消息推送、翻译、随机图片等，一行导入即可使用。
+**wtfutil** 是一个面向日常脚本与自动化任务的 Python 工具库，把最常用的那些"轮子"都封装好：增强型 HTTP 会话、文件读写、编码/加解密、SQLite/MySQL、进程管理、多通道消息推送、翻译、随机图片等，并以职责清晰的子模块提供 API。
 
 **作者**：[vicrack](https://github.com/vicrack) &nbsp;|&nbsp;
 **English**: [README.md](./README.md) &nbsp;|&nbsp;
@@ -21,6 +21,52 @@ pip install wtfutil
 
 ---
 
+## ⚠️ 1.3.0 不兼容迁移：改用子模块导入
+
+从 1.3.0 开始，**包根不再重新导出函数、类、常量或配置对象**。每个物理子模块是唯一的公开 API 边界，请把旧的包顶层导入拆分到符号实际所属的模块：
+
+```python
+# 1.2.x（1.3.0 已不再支持）
+from wtfutil import read_lines, get_resource, requests_session
+
+# 1.3.0+
+from wtfutil.fileutil import read_lines
+from wtfutil.httputil import requests_session
+from wtfutil.util import get_resource
+```
+
+例如，`MemShellParty` 的规范 SDK 导入是：
+
+```python
+from wtfutil.memshellutil import MemShellParty, MemShellPartyError
+```
+
+`wtfutil.memshell` 是 CLI 实现模块，不再提供第二套 SDK 符号入口。
+
+原先通过包根属性调用的代码也需要迁移：
+
+```python
+# 1.2.x（1.3.0 已不再支持）
+import wtfutil
+
+lines = wtfutil.read_lines("urls.txt")
+resource_path = wtfutil.get_resource("urls.txt")
+session = wtfutil.requests_session()
+
+# 1.3.0+：直接导入符号（推荐）
+from wtfutil.fileutil import read_lines
+from wtfutil.httputil import requests_session
+from wtfutil.util import get_resource
+
+lines = read_lines("urls.txt")
+resource_path = get_resource("urls.txt")
+session = requests_session()
+```
+
+仍可用 `from wtfutil import fileutil, httputil, util` 导入真实存在的公开子模块，再调用 `fileutil.read_lines(...)`、`util.get_resource(...)` 和 `httputil.requests_session(...)`；这属于 Python 的子模块导入，不代表包根继续提供旧符号。
+
+---
+
 ## 核心功能速览
 
 | 功能 | 亮点 |
@@ -31,14 +77,17 @@ pip install wtfutil
 | **数据库** | SQLite / MySQL 同一套 API，批量插入、条件查询 |
 | **通知推送** | 飞书、钉钉、Telegram、Bark、SMTP、Webhook 等十余个通道，一句 `send()` 并发推送 |
 | **单实例** | 上下文管理器 / 装饰器，防止脚本重复运行 |
-| **进程管理** | Windows 下按名称/命令行匹配、挂起/恢复/终止进程 |
+| **进程管理** | 按名称/命令行匹配、结束进程（跨平台）；挂起/恢复（Windows） |
 
 ---
 
 ## 快速开始
 
 ```python
-from wtfutil import requests_session, read_lines, write_json, send, get_resource
+from wtfutil.fileutil import read_lines, write_json
+from wtfutil.httputil import requests_session
+from wtfutil.notifyutil import send
+from wtfutil.util import get_resource
 
 # 带代理的 HTTP 会话（端口号即 127.0.0.1:10809）
 req = requests_session(proxies=10809, timeout=30)
@@ -46,7 +95,10 @@ r = req.get("https://httpbin.org/ip")
 print(r.json())
 
 # 读取资源文件（自动查找 resource/ 或 ~ 目录）
-lines = read_lines(get_resource("urls.txt"), unique=True)
+resource_path = get_resource("urls.txt")
+if resource_path is None:
+    raise FileNotFoundError("urls.txt")
+lines = read_lines(resource_path, unique=True)
 
 # 写 JSON
 write_json("out.json", {"status": "ok", "count": len(lines)})
@@ -60,11 +112,14 @@ send("任务完成", f"共处理 {len(lines)} 条数据")
 ## HTTP — `httputil`
 
 ```python
-from wtfutil import requests_session
+from wtfutil.httputil import requests_session
 from urllib3 import Retry
 
-# 最简用法（随机 UA，关闭 SSL 校验）
+# 最简用法（随机 UA，默认不校验 TLS 证书）
 req = requests_session()
+
+# 需要证书校验时显式开启
+verified_req = requests_session(verify=True)
 
 # 带代理 + 超时
 req = requests_session(proxies=10809, timeout=30)
@@ -97,7 +152,7 @@ req = requests_session(debug=True)
 发送原始 HTTP 报文：
 
 ```python
-from wtfutil import httpraw
+from wtfutil.httputil import httpraw
 
 raw = """POST /api/login HTTP/1.1
 Host: example.com
@@ -124,8 +179,16 @@ httputil.is_port_in_use(8080)               # False
 ## 文件 — `fileutil`
 
 ```python
-from wtfutil import read_text, read_lines, read_json, write_text, write_lines, write_json
-from wtfutil import file_md5, get_resource
+from wtfutil.fileutil import (
+    file_md5,
+    read_json,
+    read_lines,
+    read_text,
+    write_json,
+    write_lines,
+    write_text,
+)
+from wtfutil.util import get_resource
 
 # 读行，跳空行，保序去重
 lines = read_lines("targets.txt", unique=True)
@@ -136,7 +199,7 @@ lines = read_lines("state.txt", not_exists_ok=True)
 # 读 JSON，文件不存在时返回 {}
 config = read_json("config.json", not_exists_ok=True)
 
-# 写 JSON（自动 ensure_ascii=False，缩进 2）
+# 写 JSON（自动 ensure_ascii=False，缩进 4）
 write_json("result.json", {"items": lines, "total": len(lines)})
 
 # 写多行（自动换行）
@@ -147,6 +210,8 @@ print(file_md5("app.zip"))
 
 # 资源文件定位：当前目录 → resource/ → ~/
 path = get_resource("blacklist.txt")
+if path is None:
+    raise FileNotFoundError("blacklist.txt")
 blacklist = read_lines(path, unique=True)
 ```
 
@@ -155,7 +220,7 @@ blacklist = read_lines(path, unique=True)
 ## 字符串与加解密 — `strutil`
 
 ```python
-from wtfutil import (
+from wtfutil.strutil import (
     str_md5, str_sha256,
     base64encode, base64decode,
     url_encode, url_decode,
@@ -169,7 +234,7 @@ str_sha256(b"data")
 
 # Base64
 base64encode(b"hello world")             # "aGVsbG8gd29ybGQ="
-base64decode("aGVsbG8gd29ybGQ=")         # b"hello world"
+base64decode("aGVsbG8gd29ybGQ=")         # "hello world"
 
 # URL 编码
 url_encode("a=1&b=你好")                 # "a%3D1%26b%3D%E4%BD%A0%E5%A5%BD"
@@ -190,7 +255,7 @@ plaintext = rsa_decrypt(encrypted, private_key_pem)
 ## 数据库 — `sqlutil`
 
 ```python
-from wtfutil import SQLite, MYSQL, next_id
+from wtfutil.sqlutil import MYSQL, SQLite, next_id
 
 # SQLite
 db = SQLite("data.db")
@@ -210,8 +275,8 @@ rows = [{"id": next_id(), "url": u, "status": 0} for u in url_list]
 db.insert_many("items", rows)
 
 # 查询
-row = db.select_one("items", {"url": "https://a.com"})
-all_rows = db.select("items", {"status": 0})
+row = db.select_one("items", where_clause={"url": "https://a.com"})
+all_rows = db.select("items", where_clause={"status": 0})
 
 # 更新 / 删除
 db.update("items", {"status": 1}, {"url": "https://a.com"})
@@ -226,30 +291,28 @@ db.insert_or_replace("items", {"id": "xxx", "url": "https://b.com"})
 
 ## 通知推送 — `notifyutil`
 
-通过 `wtfconfig.ini` 或环境变量配置通道，之后无论加几个通道，代码都只写一行：
+在导入 `notifyutil` 前通过 `wtfconfig.ini` 或环境变量配置通道，之后无论启用几个通道，代码都只写一行：
 
 ```python
-from wtfutil import send, push_config
+from wtfutil.notifyutil import send
 
-# 方式一：ini 文件（推荐）
+# wtfconfig.ini（推荐）
 # [notify]
 # FEISHU_KEY = your_webhook_key
 # TG_BOT_TOKEN = 123456:xxx
 # TG_USER_ID = 88888888
 # BARK_PUSH = https://api.day.app/your_key
 
-# 方式二：运行时直接赋值
-push_config["FEISHU_KEY"] = "xxx"
-push_config["CONSOLE"] = "true"   # 同时输出到控制台
-
 # 一句话并发推到所有已配置通道
 send("爬虫异常", "目标站点返回 403，已暂停 5 分钟")
 ```
 
+运行时直接修改 `push_config` 不会重建已启用通道列表，因此新增通道应使用 ini 或环境变量配置。
+
 也可单独调用某个通道：
 
 ```python
-from wtfutil import feishu_bot, telegram_bot
+from wtfutil.notifyutil import feishu_bot, telegram_bot
 
 feishu_bot("告警", "磁盘使用率超过 90%")
 telegram_bot("告警", "磁盘使用率超过 90%")
@@ -262,40 +325,46 @@ telegram_bot("告警", "磁盘使用率超过 90%")
 防止定时任务或脚本重复启动，上下文管理器和装饰器两种用法：
 
 ```python
-from wtfutil import single_instance, SingleInstanceException
+from wtfutil.singleinstance import SingleInstance, SingleInstanceException, single_instance
 
 # 上下文管理器
 try:
-    with single_instance(flavor_id="crawler_job"):
+    with SingleInstance(flavor_id="crawler_job"):
         run_crawler()
 except SingleInstanceException:
     print("已有实例在运行，跳过本次")
 
 # 装饰器
-from wtfutil import singleinstance
-
-@singleinstance.single_instance(flavor_id="data_sync")
+@single_instance(flavor_id="data_sync")
 def sync_data():
     ...
 ```
 
 ---
 
-## Windows 进程管理 — `procutil`
+## 进程管理 — `procutil`
+
+查找 / 结束进程跨平台；挂起 / 恢复仅 Windows。
 
 ```python
-from wtfutil import procutil
+from wtfutil.procutil import (
+    find_python_processes_by_cmdline,
+    find_python_processes_by_script,
+    kill_python_processes_by_script,
+    resume_process_by_pid,
+    suspend_process_by_pid,
+)
 
 # 按脚本路径查找 Python 进程
-procs = procutil.find_python_by_script("worker.py")
+procs = find_python_processes_by_script("worker.py")
 
 # 按命令行子串查找
-procs = procutil.find_python_by_cmdline("celery worker")
+procs = find_python_processes_by_cmdline("celery worker")
 
-# 挂起 / 恢复 / 终止
-procutil.suspend_process(pid)
-procutil.resume_process(pid)
-procutil.kill_process(pid)
+# 挂起 / 恢复（仅 Windows）/ 按脚本结束（跨平台）
+suspend_process_by_pid(pid)
+resume_process_by_pid(pid)
+kill_python_processes_by_script("worker.py")
 ```
 
 CLI 工具 `pykill`（安装后全局可用）：
@@ -322,7 +391,7 @@ memshell install-skill --project   # 安装到 ./.agents/skills/memshell
 ## 杂项工具 — `util`
 
 ```python
-from wtfutil import UniqueQueue, measure_time, cut_list, group_data
+from wtfutil.util import UniqueQueue, cut_list, group_data, measure_time
 
 # 去重队列：相同内容重复 put 会被忽略（适合多线程爬虫任务分发）
 q = UniqueQueue()
@@ -339,9 +408,8 @@ def heavy_task():
 for batch in cut_list(url_list, 50):
     process_batch(batch)
 
-# 按字段分组
-from wtfutil import group_data
-groups = group_data(rows, group_by="status")  # {"0": [...], "1": [...]}
+# 按字段分组（键保留原值类型）
+groups = group_data(rows, group_by="status")  # {0: [...], 1: [...]}
 ```
 
 ---
@@ -387,7 +455,7 @@ APIHZ_IMG_KEY =
 | `wtfutil.fileutil` | 文件读写、哈希、`JarAnalyzer` | [中文](docs/zh/fileutil.md) · [EN](docs/en/fileutil.md) |
 | `wtfutil.strutil` | 编码/解码、哈希、RSA/DES、字符串工具 | [中文](docs/zh/strutil.md) · [EN](docs/en/strutil.md) |
 | `wtfutil.sqlutil` | SQLite / MySQL 封装、`Database`、SQL 辅助 | [中文](docs/zh/sqlutil.md) · [EN](docs/en/sqlutil.md) |
-| `wtfutil.procutil` | Windows 进程管理（仅 Windows） | [中文](docs/zh/procutil.md) · [EN](docs/en/procutil.md) |
+| `wtfutil.procutil` | 进程管理（查找/结束跨平台；挂起/恢复仅 Windows） | [中文](docs/zh/procutil.md) · [EN](docs/en/procutil.md) |
 | `wtfutil.configutil` | 统一 `wtfconfig.ini` 加载与 mtime 热更新 | [中文](docs/zh/configutil.md) · [EN](docs/en/configutil.md) |
 | `wtfutil.notifyutil` | 多通道通知推送 | [中文](docs/zh/notifyutil.md) · [EN](docs/en/notifyutil.md) |
 | `wtfutil.translateutil` | 百度翻译 API | [中文](docs/zh/translateutil.md) · [EN](docs/en/translateutil.md) |
@@ -398,7 +466,7 @@ APIHZ_IMG_KEY =
 | **`pykill`**（CLI） | 列出/终止 Python 进程 | [中文](docs/zh/pykill.md) · [EN](docs/en/pykill.md) |
 | **`memshell`**（CLI） | MemShellParty 生成 / install-skill | [中文](docs/zh/memshellutil.md) · [EN](docs/en/memshellutil.md) |
 
-所有公开符号均可从包顶层直接导入，`from wtfutil import read_text, requests_session, send, ...`，与 `wtfutil/__init__.py` 的 `__all__` 一致。
+从 1.3.0 起，表中的 `wtfutil.<module>` SDK 子模块都是独立且唯一的公开 API 边界。推荐直接从所属子模块导入符号，例如 `from wtfutil.fileutil import read_text`；也可使用 `from wtfutil import fileutil` 导入物理子模块。包根不维护符号映射、懒加载或包级公开符号列表；`pykill` 与 `memshell` 两行则是控制台命令。
 
 ---
 
@@ -406,4 +474,4 @@ APIHZ_IMG_KEY =
 
 欢迎在 [GitHub](https://github.com/ViCrack/wtfutil) 提交 Issue 与 Pull Request。
 
-增删公开 API 时请同步：子模块 `__all__`、`wtfutil/__init__.py`、对应 `docs/en/<module>.md` 与 `docs/zh/<module>.md`，必要时更新 [AGENTS.md](./AGENTS.md) 模块简介。
+增删公开 API 时请同步：对应子模块 `__all__`、`docs/en/<module>.md`、`docs/zh/<module>.md` 与测试；新增公开子模块时再更新模块索引和 [AGENTS.md](./AGENTS.md) 模块简介。

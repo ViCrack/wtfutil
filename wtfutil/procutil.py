@@ -1,18 +1,43 @@
 #!/usr/bin/env python3
-# _*_ coding:utf-8 _*_
+from __future__ import annotations
 
-import ctypes
 import os
-from typing import Optional, List
+import re
 
 import psutil
-import win32con
 
-# Windows API 函数
-kernel32 = ctypes.windll.kernel32
+_PYTHON_NAME_RE = re.compile(r"^pythonw?(\d+(?:\.\d+)*)?(?:\.exe)?$", re.IGNORECASE)
 
 
-def find_process_by_name(process_name: str) -> Optional[int]:
+def _require_non_empty_text(value: str, parameter_name: str) -> str:
+    """校验用于进程匹配的文本参数，避免空值匹配全部进程。"""
+    if not isinstance(value, str):
+        raise TypeError(f"{parameter_name} must be a string")
+    if not value.strip():
+        raise ValueError(f"{parameter_name} must not be empty")
+    return value
+
+
+def _require_windows() -> None:
+    if os.name != "nt":
+        raise OSError("process suspend/resume is only supported on Windows")
+
+
+def _suspend_threads(thread_ids: list[int]) -> bool:
+    _require_windows()
+    from ._winproc import suspend_threads
+
+    return suspend_threads(thread_ids)
+
+
+def _resume_threads(thread_ids: list[int]) -> bool:
+    _require_windows()
+    from ._winproc import resume_threads
+
+    return resume_threads(thread_ids)
+
+
+def find_process_by_name(process_name: str) -> int | None:
     """
     根据进程名称查找进程 PID
 
@@ -22,17 +47,20 @@ def find_process_by_name(process_name: str) -> Optional[int]:
     Returns:
         进程 PID，如果未找到则返回 None
     """
-    process_name_lower = process_name.lower()
+    process_name_lower = _require_non_empty_text(
+        process_name,
+        "process_name",
+    ).lower()
     for proc in psutil.process_iter(['pid', 'name']):
         try:
-            if proc.info['name'].lower() == process_name_lower:
+            if (proc.info.get('name') or '').lower() == process_name_lower:
                 return proc.info['pid']
         except (psutil.NoSuchProcess, psutil.AccessDenied):
             continue
     return None
 
 
-def _get_thread_ids(pid: int) -> list:
+def _get_thread_ids(pid: int) -> list[int]:
     """
     获取进程的所有线程ID
 
@@ -45,58 +73,8 @@ def _get_thread_ids(pid: int) -> list:
     try:
         process = psutil.Process(pid)
         return [t.id for t in process.threads()]
-    except Exception:
+    except (OSError, psutil.Error):
         return []
-
-
-def _suspend_threads(thread_ids: list) -> bool:
-    """
-    挂起指定的线程列表
-
-    Args:
-        thread_ids: 线程ID列表
-
-    Returns:
-        如果成功挂起至少一个线程则返回 True，否则返回 False
-    """
-    for tid in thread_ids:
-        try:
-            hThread = kernel32.OpenThread(win32con.THREAD_SUSPEND_RESUME, False, tid)
-            if hThread:
-                kernel32.SuspendThread(hThread)
-                kernel32.CloseHandle(hThread)
-                return True
-        except Exception:
-            continue
-    return False
-
-
-def _resume_threads(thread_ids: list) -> bool:
-    """
-    恢复指定的线程列表，循环恢复直到完全恢复
-
-    Args:
-        thread_ids: 线程ID列表
-
-    Returns:
-        如果成功恢复至少一个线程则返回 True，否则返回 False
-    """
-    for tid in thread_ids:
-        try:
-            hThread = kernel32.OpenThread(win32con.THREAD_SUSPEND_RESUME, False, tid)
-            if hThread:
-                # 循环恢复，直到 ResumeThread 返回值 <= 1（表示完全恢复）
-                while True:
-                    prev_count = kernel32.ResumeThread(hThread)
-                    if prev_count == 0xFFFFFFFF:  # 错误值
-                        break
-                    if prev_count <= 1:  # 完全恢复
-                        kernel32.CloseHandle(hThread)
-                        return True
-                kernel32.CloseHandle(hThread)
-        except Exception:
-            continue
-    return False
 
 
 def suspend_process_by_pid(pid: int) -> bool:
@@ -108,11 +86,17 @@ def suspend_process_by_pid(pid: int) -> bool:
 
     Returns:
         如果成功挂起至少一个线程则返回 True，否则返回 False
+
+    Raises:
+        OSError: 非 Windows 平台
     """
+    _require_windows()
+    if pid == os.getpid():
+        raise ValueError("cannot suspend the current process")
     try:
         thread_ids = _get_thread_ids(pid)
         return _suspend_threads(thread_ids) if thread_ids else False
-    except Exception:
+    except (OSError, psutil.Error):
         return False
 
 
@@ -125,7 +109,11 @@ def suspend_process(process_name: str) -> bool:
 
     Returns:
         如果成功挂起至少一个线程则返回 True，否则返回 False
+
+    Raises:
+        OSError: 非 Windows 平台
     """
+    _require_windows()
     pid = find_process_by_name(process_name)
     return suspend_process_by_pid(pid) if pid else False
 
@@ -139,11 +127,15 @@ def resume_process_by_pid(pid: int) -> bool:
 
     Returns:
         如果成功恢复至少一个线程则返回 True，否则返回 False
+
+    Raises:
+        OSError: 非 Windows 平台
     """
+    _require_windows()
     try:
         thread_ids = _get_thread_ids(pid)
         return _resume_threads(thread_ids) if thread_ids else False
-    except Exception:
+    except (OSError, psutil.Error):
         return False
 
 
@@ -156,26 +148,42 @@ def resume_process(process_name: str) -> bool:
 
     Returns:
         如果成功恢复至少一个线程则返回 True，否则返回 False
+
+    Raises:
+        OSError: 非 Windows 平台
     """
+    _require_windows()
     pid = find_process_by_name(process_name)
     return resume_process_by_pid(pid) if pid else False
 
 
-_PYTHON_PROCESS_NAMES = {'python.exe', 'pythonw.exe', 'python', 'pythonw', 'python3.exe', 'python3'}
-
-
 def _is_python_process(proc_name: str) -> bool:
-    return proc_name.lower() in _PYTHON_PROCESS_NAMES
+    """匹配 python / python3 / python3.13 / pythonw.exe 等跨平台进程名。"""
+    return bool(_PYTHON_NAME_RE.match(proc_name or ""))
 
 
-def _get_script_from_cmdline(cmdline: list) -> Optional[str]:
+def _get_script_from_cmdline(cmdline: list) -> str | None:
     """
-    从命令行参数列表中提取脚本路径（跳过 python 解释器本身及其选项标志）
+    从命令行参数中提取脚本路径；``-m`` 和 ``-c`` 启动方式不视为脚本。
     """
-    # cmdline[0] 是解释器本身，从 [1] 开始查找第一个非 -flag 的参数
-    for arg in cmdline[1:]:
-        if not arg.startswith('-'):
-            return arg
+    arguments = cmdline[1:]
+    argument_index = 0
+    options_with_separate_values = {"-W", "-X", "--check-hash-based-pycs"}
+
+    while argument_index < len(arguments):
+        argument = arguments[argument_index]
+        if argument in {"-m", "-c"} or argument.startswith(("-m", "-c")):
+            return None
+        if argument == "--":
+            next_index = argument_index + 1
+            return arguments[next_index] if next_index < len(arguments) else None
+        if argument.startswith("-"):
+            if argument in options_with_separate_values:
+                argument_index += 2
+            else:
+                argument_index += 1
+            continue
+        return argument
     return None
 
 
@@ -195,13 +203,13 @@ def _resolve_script_abs(script_arg: str, proc_cwd: str) -> str:
     return os.path.normcase(script_arg)
 
 
-def find_python_processes_by_script(script_name: str) -> List[int]:
+def find_python_processes_by_script(script_name: str) -> list[int]:
     """
     根据 Python 脚本名（支持相对/绝对路径）查找所有匹配的 Python 进程 PID 列表。
 
     匹配优先级：
-    1. 绝对路径精确匹配（大小写不敏感）
-    2. 仅文件名匹配（回退模糊匹配）
+    1. 绝对路径精确匹配（遵循当前操作系统的路径大小写规则）
+    2. 仅文件名匹配（未找到精确路径时回退）
 
     同时支持 python.exe / pythonw.exe 进程。
 
@@ -211,11 +219,18 @@ def find_python_processes_by_script(script_name: str) -> List[int]:
     Returns:
         匹配的进程 PID 列表
     """
+    script_name = _require_non_empty_text(script_name, "script_name")
     target_abs = os.path.normcase(os.path.abspath(script_name))
     target_basename = os.path.normcase(os.path.basename(script_name))
+    allows_basename_fallback = not (
+        os.path.isabs(script_name)
+        or os.path.dirname(script_name)
+        or "/" in script_name
+        or "\\" in script_name
+    )
 
-    exact_matches: List[int] = []
-    basename_matches: List[int] = []
+    exact_matches: list[int] = []
+    basename_matches: list[int] = []
 
     for proc in psutil.process_iter(['pid', 'name', 'cmdline', 'cwd']):
         try:
@@ -240,10 +255,12 @@ def find_python_processes_by_script(script_name: str) -> List[int]:
             continue
 
     # 优先返回绝对路径精确匹配，无精确匹配时返回文件名模糊匹配
-    return exact_matches if exact_matches else basename_matches
+    if exact_matches:
+        return exact_matches
+    return basename_matches if allows_basename_fallback else []
 
 
-def find_python_process_by_script(script_name: str) -> Optional[int]:
+def find_python_process_by_script(script_name: str) -> int | None:
     """
     根据 Python 脚本名查找第一个匹配的进程 PID。
 
@@ -271,8 +288,11 @@ def kill_python_processes_by_script(script_name: str) -> bool:
     if not pids:
         return False
 
+    current_pid = os.getpid()
     success = False
     for pid in pids:
+        if pid == current_pid:
+            continue
         try:
             proc = psutil.Process(pid)
             proc.kill()
@@ -282,7 +302,7 @@ def kill_python_processes_by_script(script_name: str) -> bool:
     return success
 
 
-def find_python_processes_by_cmdline(pattern: str) -> List[int]:
+def find_python_processes_by_cmdline(pattern: str) -> list[int]:
     """
     对 Python 进程的完整命令行字符串进行模糊匹配，返回所有匹配的 PID 列表。
 
@@ -294,8 +314,8 @@ def find_python_processes_by_cmdline(pattern: str) -> List[int]:
     Returns:
         匹配的进程 PID 列表
     """
-    pattern_lower = pattern.lower()
-    results: List[int] = []
+    pattern_lower = _require_non_empty_text(pattern, "pattern").lower()
+    results: list[int] = []
 
     for proc in psutil.process_iter(['pid', 'name', 'cmdline']):
         try:
@@ -330,7 +350,7 @@ def _build_proc_detail(info: dict) -> dict:
     }
 
 
-def find_python_process_details_by_script(script_name: str) -> List[dict]:
+def find_python_process_details_by_script(script_name: str) -> list[dict]:
     """
     根据 Python 脚本名查找所有匹配进程，返回详情字典列表。
 
@@ -342,11 +362,18 @@ def find_python_process_details_by_script(script_name: str) -> List[dict]:
     Returns:
         匹配的进程详情列表
     """
+    script_name = _require_non_empty_text(script_name, "script_name")
     target_abs = os.path.normcase(os.path.abspath(script_name))
     target_basename = os.path.normcase(os.path.basename(script_name))
+    allows_basename_fallback = not (
+        os.path.isabs(script_name)
+        or os.path.dirname(script_name)
+        or "/" in script_name
+        or "\\" in script_name
+    )
 
-    exact_matches: List[dict] = []
-    basename_matches: List[dict] = []
+    exact_matches: list[dict] = []
+    basename_matches: list[dict] = []
 
     for proc in psutil.process_iter(['pid', 'name', 'cmdline', 'cwd']):
         try:
@@ -370,10 +397,12 @@ def find_python_process_details_by_script(script_name: str) -> List[dict]:
         except (psutil.NoSuchProcess, psutil.AccessDenied):
             continue
 
-    return exact_matches if exact_matches else basename_matches
+    if exact_matches:
+        return exact_matches
+    return basename_matches if allows_basename_fallback else []
 
 
-def find_python_process_details_by_cmdline(pattern: str) -> List[dict]:
+def find_python_process_details_by_cmdline(pattern: str) -> list[dict]:
     """
     对 Python 进程命令行进行模糊匹配，返回详情字典列表。
 
@@ -385,8 +414,8 @@ def find_python_process_details_by_cmdline(pattern: str) -> List[dict]:
     Returns:
         匹配的进程详情列表
     """
-    pattern_lower = pattern.lower()
-    results: List[dict] = []
+    pattern_lower = _require_non_empty_text(pattern, "pattern").lower()
+    results: list[dict] = []
 
     for proc in psutil.process_iter(['pid', 'name', 'cmdline', 'cwd']):
         try:
@@ -419,8 +448,11 @@ def kill_python_processes_by_cmdline(pattern: str) -> bool:
     if not pids:
         return False
 
+    current_pid = os.getpid()
     success = False
     for pid in pids:
+        if pid == current_pid:
+            continue
         try:
             proc = psutil.Process(pid)
             proc.kill()
@@ -430,7 +462,7 @@ def kill_python_processes_by_cmdline(pattern: str) -> bool:
     return success
 
 
-def list_all_python_process_details() -> List[dict]:
+def list_all_python_process_details() -> list[dict]:
     """
     枚举系统中所有 Python 进程，返回详情字典列表。
 
@@ -439,7 +471,7 @@ def list_all_python_process_details() -> List[dict]:
     Returns:
         所有 Python 进程的详情列表
     """
-    results: List[dict] = []
+    results: list[dict] = []
     for proc in psutil.process_iter(['pid', 'name', 'cmdline', 'cwd']):
         try:
             info = proc.info
@@ -453,16 +485,16 @@ def list_all_python_process_details() -> List[dict]:
 
 __all__ = [
     'find_process_by_name',
-    'suspend_process',
-    'suspend_process_by_pid',
+    'find_python_process_by_script',
+    'find_python_process_details_by_cmdline',
+    'find_python_process_details_by_script',
+    'find_python_processes_by_cmdline',
+    'find_python_processes_by_script',
+    'kill_python_processes_by_cmdline',
+    'kill_python_processes_by_script',
+    'list_all_python_process_details',
     'resume_process',
     'resume_process_by_pid',
-    'find_python_process_by_script',
-    'find_python_processes_by_script',
-    'find_python_process_details_by_script',
-    'kill_python_processes_by_script',
-    'find_python_processes_by_cmdline',
-    'find_python_process_details_by_cmdline',
-    'kill_python_processes_by_cmdline',
-    'list_all_python_process_details',
+    'suspend_process',
+    'suspend_process_by_pid',
 ]

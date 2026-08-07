@@ -4,7 +4,6 @@
 
 import base64
 import binascii
-import copyreg
 import hashlib
 import pickle
 import random
@@ -14,7 +13,6 @@ import sys
 import unicodedata
 from functools import lru_cache, wraps
 from typing import Any
-from io import BytesIO
 from urllib.parse import unquote, quote
 
 from Crypto.Cipher import DES
@@ -25,9 +23,7 @@ from requests.structures import CaseInsensitiveDict
 
 
 def tobytes(s: Any, encoding: str = "UTF-8") -> bytes:
-    """
-    convert to bytes
-    """
+    """将字符串或常见字节容器转换为 ``bytes``。"""
     if isinstance(s, bytes):
         return s
     elif isinstance(s, bytearray):
@@ -40,7 +36,8 @@ def tobytes(s: Any, encoding: str = "UTF-8") -> bytes:
         return bytes([s])
 
 
-def tostr(value: Any, encoding: str = 'UTF-8') -> str:
+def tostr(value: Any, encoding: str = 'UTF-8') -> str | None:
+    """将值转换为字符串；输入 ``None`` 时原样返回。"""
     if value is None:
         return value
     if isinstance(value, str):
@@ -51,10 +48,7 @@ def tostr(value: Any, encoding: str = 'UTF-8') -> str:
 
 
 def tobool(value: Any) -> bool:
-    """Return whether the provided string (or any value really) represents true. Otherwise false.
-    Just like plugin server stringToBoolean.
-    Replace distutils.strtobool
-    """
+    """按常见配置文本规则把值转换为布尔值。"""
     if not value:
         return False
 
@@ -251,7 +245,7 @@ def uuencode(binary_data: bytes | str) -> str:
     类似java中的UUEncoder实现
     """
     if isinstance(binary_data, str):
-        value = binary_data.encode('utf-8')
+        binary_data = binary_data.encode('utf-8')
     # 分块将二进制数据进行 uuencode 编码
     chunk_size = 45
     # At most 45 bytes at once
@@ -346,40 +340,6 @@ def base64pickle(value: Any) -> str:
             retVal = base64encode(pickle.dumps(value))
         except:
             retVal = base64encode(pickle.dumps(str(value), pickle.HIGHEST_PROTOCOL))
-
-    return retVal
-
-
-def base64unpickle(value: str | bytes) -> Any:
-    """
-    Decodes value from Base64 to plain format and deserializes (with pickle) its content
-    >>> base64unpickle('gAJVBmZvb2JhcnEALg==')
-    'foobar'
-    pickle存在安全漏洞
-    python sqlmap.py --pickled-options "Y29zCnN5c3RlbQooUydkaXInCnRSLg=="
-    """
-
-    retVal = None
-
-    def _(self):
-        if len(self.stack) > 1:
-            func = self.stack[-2]
-            if '.' in repr(func) and " 'lib." not in repr(func):
-                raise Exception("abusing reduce() is bad, Mkay!")
-        self.load_reduce()
-
-    def loads(str):
-        file = BytesIO(str)
-        unpickler = pickle.Unpickler(file)
-        # unpickler.dispatch[pickle.REDUCE] = _
-        dispatch_table = copyreg.dispatch_table.copy()
-        dispatch_table[pickle.REDUCE] = _
-        return unpickler.load()
-
-    try:
-        retVal = loads(base64decode(value))
-    except TypeError:
-        retVal = loads(base64decode(str(value)))
 
     return retVal
 
@@ -564,33 +524,40 @@ def rand_case(s: str) -> str:
     if not s:
         raise ValueError("Input string cannot be empty")
 
-    # 将字符串转换为字符列表，方便操作
     chars = list(s)
-    # 随机选择一个字符的索引，强制使其大小写与原始相反
-    force_diff_idx = random.randint(0, len(s) - 1)
+    case_sensitive_indices = [
+        character_index
+        for character_index, character in enumerate(chars)
+        if character.lower() != character.upper()
+    ]
+    if not case_sensitive_indices:
+        raise ValueError("Input string must contain a case-sensitive character")
+
+    force_diff_index = random.choice(case_sensitive_indices)
 
     result = []
-    for i, c in enumerate(chars):
-        if i == force_diff_idx:
-            # 强制大小写相反
-            result.append(c.upper() if c.islower() else c.lower())
+    for character_index, character in enumerate(chars):
+        if character_index == force_diff_index:
+            result.append(
+                character.upper()
+                if character == character.lower()
+                else character.lower()
+            )
         else:
-            # 其他字符随机选择大写或小写
-            result.append(random.choice([c.upper(), c.lower()]))
+            result.append(random.choice([character.upper(), character.lower()]))
 
     return ''.join(result)
 
 
 def match1(text: str, *patterns: str) -> str | list[str] | None:
-    """Scans through a string for substrings matched some patterns (first-subgroups only).
+    """依次匹配正则表达式，并返回每个表达式的第一个捕获组。
 
     Args:
-        text: A string to be scanned.
-        patterns: Arbitrary number of regex patterns.
+        text: 待搜索文本。
+        patterns: 一个或多个正则表达式。
 
     Returns:
-        When only one pattern is given, returns a string (None if no match found).
-        When more than one pattern are given, returns a list of strings ([] if no match found).
+        只有一个表达式时返回字符串或 ``None``；多个表达式时返回匹配结果列表。
     """
 
     if len(patterns) == 1:
@@ -610,22 +577,23 @@ def match1(text: str, *patterns: str) -> str | list[str] | None:
 
 
 def string_to_bash_variable(string: str) -> str:
-    # 定义不允许出现在bash变量名中的字符
+    """把任意文本转换为合法且非空的 Bash 变量名。"""
+    if not isinstance(string, str):
+        raise TypeError("string must be a string")
+
     invalid_chars = ['.', '/', '-', '=', '`', "'", '"']
-    # 将字符串中的非法字符替换成下划线
     bash_var = ''.join(['_' if c in invalid_chars else c for c in string])
-    # 如果变量以数字开头，则在前面添加下划线
+    bash_var = ''.join([c if c.isalnum() or c == '_' else '' for c in bash_var])
+    if not bash_var:
+        return "_"
     if bash_var[0].isdigit():
         bash_var = '_' + bash_var
-    # 将变量名转换为合法的bash变量名（只包含字母、数字和下划线）
-    bash_var = ''.join([c if c.isalnum() or c == '_' else '' for c in bash_var])
 
     return bash_var
 
 
 def normalize_spaces(s: str) -> str:
-    """Normalize multiple spaces into a single space.
-    删除多余空格并合并为单个空格"""
+    """删除首尾空白，并把连续空白合并为单个空格。"""
     return ' '.join(s.split())
 
 
@@ -643,7 +611,7 @@ def extract_dict(text, sep, sep2="="):
 
 
 def format_bytes(size: int) -> str:
-    """Format bytes size to human-readable format."""
+    """把字节数格式化为便于阅读的二进制单位。"""
     for unit in ['', 'Ki', 'Mi', 'Gi', 'Ti', 'Pi', 'Ei', 'Zi']:
         if abs(size) < 1024.0:
             return f"{size:.2f} {unit}B"
@@ -652,7 +620,9 @@ def format_bytes(size: int) -> str:
 
 
 def align_text(text: str, width: int, align: str = 'left') -> str:
-    """Align multi-line text based on given width and alignment."""
+    """按指定宽度和方向对齐多行文本。"""
+    if align not in {"left", "center", "right"}:
+        raise ValueError("align must be 'left', 'center', or 'right'")
     lines = text.splitlines()
     aligned_lines = []
     for line in lines:
@@ -901,7 +871,6 @@ __all__ = [
     'urlsafe_base64encode',
     'urlsafe_base64decode',
     'base64pickle',
-    'base64unpickle',
     'rsa_encrypt',
     'rsa_decrypt',
     'des_encrypt',

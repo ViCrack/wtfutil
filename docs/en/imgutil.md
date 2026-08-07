@@ -3,7 +3,7 @@
 Random avatar fetch with multi-source fallback.
 
 ```python
-from wtfutil import random_avatar_bytes, img_config
+from wtfutil.imgutil import img_config, random_avatar_bytes
 ```
 
 ## Symbols
@@ -17,6 +17,8 @@ from wtfutil import random_avatar_bytes, img_config
 
 Built-in sources (random order): `loliapi`, `dmoe`, `xjh`, `btstu`, `horosama`. Optional `apihz` when `APIHZ_IMG_ID` + `APIHZ_IMG_KEY` are set.
 
+Responses must be HTTP 200, at least 256 bytes, and identify as an image through `Content-Type` or a PNG/JPEG/GIF/WebP signature. HTML error and rate-limit pages are rejected and the next provider is tried.
+
 ## Configuration
 
 | Key | Description |
@@ -27,7 +29,7 @@ Built-in sources (random order): `loliapi`, `dmoe`, `xjh`, `btstu`, `horosama`. 
 | `APIHZ_IMG_TYPE` | `type` param (default `1`) |
 
 ```python
-from wtfutil import fetch_random_bytes, ImageFetchError
+from wtfutil.imgutil import ImageFetchError, fetch_random_bytes
 
 def my_fetcher(session):
     return session.get("https://my.cdn/avatar.jpg").content

@@ -3,7 +3,7 @@
 <a href="https://pypi.python.org/pypi/wtfutil"><img src="https://img.shields.io/pypi/v/wtfutil.svg"></a>
 <a href="https://pypi.python.org/pypi/wtfutil"><img src="https://img.shields.io/pypi/pyversions/wtfutil.svg"></a>
 
-**wtfutil** is a Python utility library for everyday scripting and automation. It packs the most commonly needed "wheels" into one package: enhanced HTTP sessions, file I/O, encoding & crypto, SQLite/MySQL, Windows process control, multi-channel push notifications, translation, and random images — all importable from a single top-level namespace.
+**wtfutil** is a Python utility library for everyday scripting and automation. It packs the most commonly needed "wheels" into one package: enhanced HTTP sessions, file I/O, encoding & crypto, SQLite/MySQL, process control, multi-channel push notifications, translation, and random images — organized into focused public submodules.
 
 **Author**: [vicrack](https://github.com/vicrack) &nbsp;|&nbsp;
 **中文文档**: [README_zh.md](./README_zh.md) &nbsp;|&nbsp;
@@ -21,6 +21,36 @@ Requires Python 3.10+.
 
 ---
 
+## ⚠️ 1.3.0 Breaking Migration: Import from Submodules
+
+> [!IMPORTANT]
+> wtfutil 1.3.0 removes package-root symbol re-exports. Import functions, classes, constants, and configuration objects from the public submodule that owns them.
+
+| Legacy package-root name | Import in 1.3.0+ |
+|--------------------------|------------------|
+| `requests_session` imported from `wtfutil` | `from wtfutil.httputil import requests_session` |
+| `read_lines` imported from `wtfutil` | `from wtfutil.fileutil import read_lines` |
+| `get_resource` imported from `wtfutil` | `from wtfutil.util import get_resource` |
+| `send` imported from `wtfutil` | `from wtfutil.notifyutil import send` |
+| `MemShellParty` imported from `wtfutil` | `from wtfutil.memshellutil import MemShellParty` |
+
+Replace legacy package attributes such as `wtfutil.read_lines(...)`, `wtfutil.get_resource(...)`, and `wtfutil.requests_session(...)` with attributes on their owning modules:
+
+```python
+import wtfutil.fileutil as fileutil
+import wtfutil.httputil as httputil
+import wtfutil.util as util
+
+lines = fileutil.read_lines(util.get_resource("urls.txt"), unique=True)
+session = httputil.requests_session(timeout=30)
+```
+
+Importing a physical public submodule (for example, `from wtfutil import procutil`) remains valid Python, but direct imports from `wtfutil.<module>` make ownership and migration clearer.
+
+For example, `from wtfutil.memshellutil import MemShellParty, MemShellPartyError` is the canonical SDK import. `wtfutil.memshell` remains the CLI implementation module rather than a second SDK owner.
+
+---
+
 ## Feature Highlights
 
 | Feature | What it gives you |
@@ -31,22 +61,28 @@ Requires Python 3.10+.
 | **Database** | Unified API for SQLite & MySQL — insert, query, bulk insert, upsert |
 | **Notifications** | Feishu, DingTalk, Telegram, Bark, SMTP, Webhook and more — one `send()` call fans out concurrently |
 | **Single instance** | Context manager or decorator to prevent duplicate script runs |
-| **Process control** | Windows: find / suspend / resume / kill processes by name or command line |
+| **Process control** | Find/kill by name or cmdline (cross-platform); suspend/resume (Windows) |
 
 ---
 
 ## Quick Start
 
 ```python
-from wtfutil import requests_session, read_lines, write_json, send, get_resource
+from wtfutil.fileutil import read_lines, write_json
+from wtfutil.httputil import requests_session
+from wtfutil.notifyutil import send
+from wtfutil.util import get_resource
 
 # HTTP session with proxy (int = 127.0.0.1:<port>)
 req = requests_session(proxies=10809, timeout=30)
 r = req.get("https://httpbin.org/ip")
 print(r.json())
 
-# Read a resource file (looks in cwd → resource/ → ~/)
-lines = read_lines(get_resource("urls.txt"), unique=True)
+# Read a resource file (looks in cwd -> resource/ -> ~/)
+resource_path = get_resource("urls.txt")
+if resource_path is None:
+    raise FileNotFoundError("urls.txt")
+lines = read_lines(resource_path, unique=True)
 
 # Write JSON
 write_json("out.json", {"status": "ok", "count": len(lines)})
@@ -55,18 +91,19 @@ write_json("out.json", {"status": "ok", "count": len(lines)})
 send("Job done", f"Processed {len(lines)} items")
 ```
 
-Sub-module imports also work: `from wtfutil import httputil, fileutil, notifyutil, util`.
-
 ---
 
 ## HTTP — `httputil`
 
 ```python
-from wtfutil import requests_session
+from wtfutil.httputil import requests_session
 from urllib3 import Retry
 
-# Minimal (random UA, SSL verify disabled)
+# Minimal (random UA, TLS certificate verification disabled)
 req = requests_session()
+
+# Explicitly enable certificate verification when required
+verified_req = requests_session(verify=True)
 
 # Proxy + timeout
 req = requests_session(proxies=10809, timeout=30)
@@ -99,7 +136,7 @@ req = requests_session(debug=True)
 Send raw HTTP messages:
 
 ```python
-from wtfutil import httpraw
+from wtfutil.httputil import httpraw
 
 raw = """POST /api/login HTTP/1.1
 Host: example.com
@@ -113,12 +150,12 @@ resp = httpraw(raw, ssl=True, timeout=10)
 URL / IP utilities:
 
 ```python
-from wtfutil import httputil
+from wtfutil.httputil import get_maindomain, is_port_in_use, is_private_ip, url2ip
 
-httputil.is_private_ip("192.168.1.1")       # True
-httputil.get_maindomain("sub.example.com")  # "example.com"
-httputil.url2ip("example.com")              # "93.184.216.34"
-httputil.is_port_in_use(8080)               # False
+is_private_ip("192.168.1.1")       # True
+get_maindomain("sub.example.com")  # "example.com"
+url2ip("example.com")              # "93.184.216.34"
+is_port_in_use(8080)               # False
 ```
 
 ---
@@ -126,8 +163,16 @@ httputil.is_port_in_use(8080)               # False
 ## Files — `fileutil`
 
 ```python
-from wtfutil import read_text, read_lines, read_json, write_text, write_lines, write_json
-from wtfutil import file_md5, get_resource
+from wtfutil.fileutil import (
+    file_md5,
+    read_json,
+    read_lines,
+    read_text,
+    write_json,
+    write_lines,
+    write_text,
+)
+from wtfutil.util import get_resource
 
 # Read lines, skip blanks, preserve-order dedup
 lines = read_lines("targets.txt", unique=True)
@@ -138,7 +183,7 @@ lines = read_lines("state.txt", not_exists_ok=True)
 # Read JSON, returns {} if file is missing
 config = read_json("config.json", not_exists_ok=True)
 
-# Write JSON (ensure_ascii=False, indent=2)
+# Write JSON (ensure_ascii=False, indent=4)
 write_json("result.json", {"items": lines, "total": len(lines)})
 
 # Write lines
@@ -149,6 +194,8 @@ print(file_md5("app.zip"))
 
 # Resource file lookup: cwd → resource/ → ~/
 path = get_resource("blacklist.txt")
+if path is None:
+    raise FileNotFoundError("blacklist.txt")
 blacklist = read_lines(path, unique=True)
 ```
 
@@ -157,7 +204,7 @@ blacklist = read_lines(path, unique=True)
 ## Strings & Crypto — `strutil`
 
 ```python
-from wtfutil import (
+from wtfutil.strutil import (
     str_md5, str_sha256,
     base64encode, base64decode,
     url_encode, url_decode,
@@ -171,7 +218,7 @@ str_sha256(b"data")
 
 # Base64
 base64encode(b"hello world")             # "aGVsbG8gd29ybGQ="
-base64decode("aGVsbG8gd29ybGQ=")         # b"hello world"
+base64decode("aGVsbG8gd29ybGQ=")         # "hello world"
 
 # URL encoding
 url_encode("a=1&b=hello world")          # "a%3D1%26b%3Dhello%20world"
@@ -192,7 +239,7 @@ plaintext = rsa_decrypt(encrypted, private_key_pem)
 ## Database — `sqlutil`
 
 ```python
-from wtfutil import SQLite, MYSQL, next_id
+from wtfutil.sqlutil import MYSQL, SQLite, next_id
 
 # SQLite
 db = SQLite("data.db")
@@ -213,8 +260,8 @@ rows = [{"id": next_id(), "url": u, "status": 0} for u in url_list]
 db.insert_many("items", rows)
 
 # Query
-row  = db.select_one("items", {"url": "https://a.com"})
-rows = db.select("items", {"status": 0})
+row = db.select_one("items", where_clause={"url": "https://a.com"})
+rows = db.select("items", where_clause={"status": 0})
 
 # Update / delete
 db.update("items", {"status": 1}, {"url": "https://a.com"})
@@ -229,30 +276,28 @@ db.insert_or_replace("items", {"id": "xxx", "url": "https://b.com"})
 
 ## Notifications — `notifyutil`
 
-Configure channels once (via `wtfconfig.ini` or env vars), then your code stays unchanged regardless of how many channels you add:
+Configure channels before importing `notifyutil` (via `wtfconfig.ini` or environment variables), then your code stays unchanged regardless of how many channels you add:
 
 ```python
-from wtfutil import send, push_config
+from wtfutil.notifyutil import send
 
-# Option A: wtfconfig.ini
+# wtfconfig.ini
 # [notify]
 # FEISHU_KEY = your_webhook_key
 # TG_BOT_TOKEN = 123456:xxx
 # TG_USER_ID = 88888888
 # BARK_PUSH = https://api.day.app/your_key
 
-# Option B: set at runtime
-push_config["FEISHU_KEY"] = "xxx"
-push_config["CONSOLE"] = "true"   # also print to stdout
-
 # Fan out to all configured channels concurrently
 send("Scraper error", "Target site returned 403, pausing for 5 minutes")
 ```
 
+Changing values in `push_config` at runtime does not rebuild the enabled-channel list, so use the ini file or environment variables to enable new channels.
+
 Call a single channel directly:
 
 ```python
-from wtfutil import feishu_bot, telegram_bot
+from wtfutil.notifyutil import feishu_bot, telegram_bot
 
 feishu_bot("Alert", "Disk usage exceeded 90%")
 telegram_bot("Alert", "Disk usage exceeded 90%")
@@ -265,19 +310,17 @@ telegram_bot("Alert", "Disk usage exceeded 90%")
 Prevent a script or scheduled job from running more than once at a time:
 
 ```python
-from wtfutil import single_instance, SingleInstanceException
+from wtfutil.singleinstance import SingleInstance, SingleInstanceException, single_instance
 
 # Context manager
 try:
-    with single_instance(flavor_id="crawler_job"):
+    with SingleInstance(flavor_id="crawler_job"):
         run_crawler()
 except SingleInstanceException:
     print("Already running, skipping")
 
 # Decorator
-from wtfutil import singleinstance
-
-@singleinstance.single_instance(flavor_id="data_sync")
+@single_instance(flavor_id="data_sync")
 def sync_data():
     ...
 ```
@@ -287,21 +330,29 @@ Details: [docs/en/singleinstance.md](docs/en/singleinstance.md)
 
 ---
 
-## Windows Process Control — `procutil`
+## Process Control — `procutil`
+
+Find/kill is cross-platform; suspend/resume is Windows-only.
 
 ```python
-from wtfutil import procutil
+from wtfutil.procutil import (
+    find_python_processes_by_cmdline,
+    find_python_processes_by_script,
+    kill_python_processes_by_script,
+    resume_process_by_pid,
+    suspend_process_by_pid,
+)
 
 # Find Python processes by script path
-procs = procutil.find_python_by_script("worker.py")
+procs = find_python_processes_by_script("worker.py")
 
 # Find by command-line substring
-procs = procutil.find_python_by_cmdline("celery worker")
+procs = find_python_processes_by_cmdline("celery worker")
 
-# Suspend / resume / kill
-procutil.suspend_process(pid)
-procutil.resume_process(pid)
-procutil.kill_process(pid)
+# Suspend / resume (Windows only) / kill by script (cross-platform)
+suspend_process_by_pid(pid)
+resume_process_by_pid(pid)
+kill_python_processes_by_script("worker.py")
 ```
 
 `pykill` CLI (installed with the package):
@@ -330,7 +381,7 @@ Details: [docs/en/memshellutil.md](docs/en/memshellutil.md)
 ## Misc Utilities — `util`
 
 ```python
-from wtfutil import UniqueQueue, measure_time, cut_list, group_data
+from wtfutil.util import UniqueQueue, cut_list, group_data, measure_time
 
 # Dedup queue: duplicate dicts are silently dropped (great for multi-thread crawlers)
 q = UniqueQueue()
@@ -348,7 +399,7 @@ for batch in cut_list(url_list, 50):
     process_batch(batch)
 
 # Group rows by a field
-groups = group_data(rows, group_by="status")  # {"0": [...], "1": [...]}
+groups = group_data(rows, group_by="status")  # {0: [...], 1: [...]}
 ```
 
 ---
@@ -394,7 +445,7 @@ Full key list: `wtfconfig.ini.example`; API details: [configutil](docs/en/config
 | `wtfutil.fileutil` | File I/O, hashing, `JarAnalyzer` | [EN](docs/en/fileutil.md) · [ZH](docs/zh/fileutil.md) |
 | `wtfutil.strutil` | Encoding, hashing, RSA/DES, string tools | [EN](docs/en/strutil.md) · [ZH](docs/zh/strutil.md) |
 | `wtfutil.sqlutil` | SQLite / MySQL wrappers, `Database`, SQL helpers | [EN](docs/en/sqlutil.md) · [ZH](docs/zh/sqlutil.md) |
-| `wtfutil.procutil` | Windows process control (Windows only) | [EN](docs/en/procutil.md) · [ZH](docs/zh/procutil.md) |
+| `wtfutil.procutil` | Process control (find/kill cross-platform; suspend/resume Windows only) | [EN](docs/en/procutil.md) · [ZH](docs/zh/procutil.md) |
 | `wtfutil.configutil` | Unified `wtfconfig.ini` load + mtime hot-reload | [EN](docs/en/configutil.md) · [ZH](docs/zh/configutil.md) |
 | `wtfutil.notifyutil` | Multi-channel push notifications | [EN](docs/en/notifyutil.md) · [ZH](docs/zh/notifyutil.md) |
 | `wtfutil.translateutil` | Baidu Translate API | [EN](docs/en/translateutil.md) · [ZH](docs/zh/translateutil.md) |
@@ -405,7 +456,7 @@ Full key list: `wtfconfig.ini.example`; API details: [configutil](docs/en/config
 | **`pykill`** (CLI) | List/kill Python processes (wraps `procutil`) | [EN](docs/en/pykill.md) · [ZH](docs/zh/pykill.md) |
 | **`memshell`** (CLI) | MemShellParty generate / install-skill | [EN](docs/en/memshellutil.md) · [ZH](docs/zh/memshellutil.md) |
 
-All public symbols are also exported at package top level: `from wtfutil import read_text, requests_session, send, ...`. See `wtfutil/__init__.py` `__all__`.
+Public SDK APIs live in the physical submodules listed above. Import each symbol from its owning `wtfutil.<module>` path.
 
 ---
 
@@ -413,4 +464,4 @@ All public symbols are also exported at package top level: `from wtfutil import 
 
 Issues and pull requests are welcome on [GitHub](https://github.com/ViCrack/wtfutil).
 
-When adding or changing public APIs, update the module `__all__`, `wtfutil/__init__.py`, and the matching files under `docs/en/` and `docs/zh/`. See [AGENTS.md](./AGENTS.md) for agent-oriented project notes.
+When adding or changing public APIs, update the owning module's API documentation under `docs/en/` and `docs/zh/`. See [AGENTS.md](./AGENTS.md) for agent-oriented project notes.

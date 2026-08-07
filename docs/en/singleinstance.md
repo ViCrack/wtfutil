@@ -3,7 +3,7 @@
 Prevent more than one instance of a script on the same machine using a **non-blocking file lock** (`portalocker`). Lock file defaults to the OS temp directory.
 
 ```python
-from wtfutil import single_instance, SingleInstance, SingleInstanceException
+from wtfutil.singleinstance import SingleInstance, SingleInstanceException, single_instance
 ```
 
 ## Symbols
@@ -46,6 +46,7 @@ with SingleInstance(lockfile="/var/run/myapp.lock"):
 ## Notes
 
 - Lock is acquired on `__enter__` with `LOCK_EX | LOCK_NB` (fail fast if busy).
-- On exit, unlocks and attempts to remove the lock file.
+- On exit, unlocks and closes the file but intentionally keeps the reusable lock file. Removing it after unlock would introduce an inode/path race on Unix.
+- If lock acquisition fails, the newly opened file handle is closed before `SingleInstanceException` is raised.
 - Design avoids some Windows multi-thread lock races (see module docstring / tendo discussion).
 - Test locally: `python -m wtfutil.singleinstance` runs a minimal loop until Ctrl+C.

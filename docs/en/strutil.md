@@ -3,7 +3,7 @@
 Encoding/decoding, hashing, RSA/DES, string utilities, UTF-7, ghost bits.
 
 ```python
-from wtfutil import str_md5, base64encode, url_encode
+from wtfutil.strutil import base64encode, str_md5, url_encode
 ```
 
 ## Symbol index
@@ -20,9 +20,13 @@ from wtfutil import str_md5, base64encode, url_encode
 
 `removesuffix`, `removeprefix`, `get_middle_text`, `splitlines`, `normalize_spaces`, `align_text`, `match1`, `string_to_bash_variable`
 
+`rand_case` requires at least one case-sensitive character and otherwise raises `ValueError`; `string_to_bash_variable` always returns a non-empty valid name (`"_"` for an empty result).
+
 ### URL / Base64
 
-`url_encode_all`, `url_encode`, `url_decode`, `qp_encode_all`, `uuencode`, `base64encode`, `base64decode`, `base64_urlencode`, `base64_urldecode`, `urlsafe_base64encode`, `urlsafe_base64decode`, `base64pickle`, `base64unpickle`
+`url_encode_all`, `url_encode`, `url_decode`, `qp_encode_all`, `uuencode`, `base64encode`, `base64decode`, `base64_urlencode`, `base64_urldecode`, `urlsafe_base64encode`, `urlsafe_base64decode`, `base64pickle`
+
+`base64unpickle` was removed because Python pickle cannot safely deserialize untrusted data through the previous attempted opcode restriction. Applications that intentionally deserialize trusted pickle data must implement that policy explicitly outside wtfutil.
 
 ### Crypto
 
@@ -39,7 +43,7 @@ from wtfutil import str_md5, base64encode, url_encode
 ## Examples
 
 ```python
-from wtfutil import str_md5, url_encode, base64encode, get_middle_text, rand_base
+from wtfutil.strutil import base64encode, get_middle_text, rand_base, str_md5, url_encode
 
 str_md5("hello")
 url_encode("a=1&b=2")

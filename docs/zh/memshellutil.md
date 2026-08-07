@@ -13,7 +13,7 @@
 ## 快速上手
 
 ```python
-from wtfutil import MemShellParty, MemShellPartyError
+from wtfutil.memshellutil import MemShellParty, MemShellPartyError
 
 with MemShellParty() as client:
     result = client.generate(
@@ -29,11 +29,9 @@ with MemShellParty() as client:
     print(info["shellClassName"], info["injectorClassName"])
 ```
 
-导入方式任选其一：
+SDK 符号从公开子模块导入：
 
 ```python
-from wtfutil import MemShellParty
-# 或
 from wtfutil.memshellutil import MemShellParty
 ```
 
@@ -217,7 +215,7 @@ print(mem["shellToolConfig"])  # 含实际密码等（若曾留空随机）
 若只要紧凑元信息、不要大段 `packResult`，可用：
 
 ```python
-from wtfutil import extract_generate_meta
+from wtfutil.memshellutil import extract_generate_meta
 
 meta = extract_generate_meta(result)
 # shellClassName / injectorClassName / shellToolConfig / hasPackResult ...
@@ -277,7 +275,7 @@ result = client.generate(body=body, jre=9)
 也可只组装请求体、稍后再发：
 
 ```python
-from wtfutil import build_generate_body
+from wtfutil.memshellutil import build_generate_body
 
 req = build_generate_body(shell_tool="Godzilla", password="p", key="k", header_value="h")
 result = client.generate(body=req)
@@ -296,7 +294,7 @@ result = client.generate(body=req)
 | `e.body` | 原始响应 body（dict 或文本片段） |
 
 ```python
-from wtfutil import MemShellParty, MemShellPartyError
+from wtfutil.memshellutil import MemShellParty, MemShellPartyError
 
 try:
     with MemShellParty() as client:
@@ -328,7 +326,7 @@ except MemShellPartyError as e:
 
 ## CLI（可选）
 
-安装包后提供控制台命令 `memshell`（不在包 `__all__` 中）。人类/脚本优先用 SDK；自动化或 Agent 场景可用 CLI。
+安装包后提供控制台命令 `memshell`。`wtfutil.memshell` 是 CLI 实现模块，不属于公开 SDK 子模块；Python 调用请使用 `wtfutil.memshellutil`，自动化或 Agent 场景也可直接使用 CLI。
 
 ```bash
 memshell generate --help
@@ -353,6 +351,6 @@ memshell install-skill --project
 
 ```bash
 python -m unittest tests.test_memshell
-# 跳过访问 party.mem.mk 的联调用例：
-set MEMSHELL_SKIP_LIVE=1
+# 联调用例默认跳过；需要时显式启用：
+set MEMSHELL_RUN_LIVE=1
 ```

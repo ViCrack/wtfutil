@@ -8,52 +8,50 @@
 
 ### 1. 主要入口与导入方式
 
-**推荐做法**：所有公开符号均可从包顶层直接导入，IDE 可自动补全：
+从 wtfutil 1.3.0 开始，**物理子模块是唯一的公开 API 边界**。函数、类、常量和配置对象必须从其所属子模块导入，推荐写法：
 
 ```python
-from wtfutil import requests_session, read_text, send, get_resource
+from wtfutil.fileutil import read_text
+from wtfutil.httputil import requests_session
+from wtfutil.notifyutil import send
+from wtfutil.util import get_resource
 ```
 
-**按子模块精细导入**（用于只需特定功能、或需要访问子模块内部类时）：
+仍支持通过 Python 的常规导入机制导入真实存在的公开子模块：
 
 ```python
-from wtfutil import httputil   # HTTP 相关
-from wtfutil import fileutil   # 文件相关
-from wtfutil import strutil    # 字符串与加解密
-from wtfutil import sqlutil    # 数据库
-from wtfutil import procutil   # 进程管理（Windows）
-from wtfutil import notifyutil # 通知
-from wtfutil import translateutil # 翻译
-from wtfutil import memshellutil # MemShellParty 内存马生成
-from wtfutil import imgutil    # 随机图片/头像拉取
-from wtfutil import configutil # wtfconfig.ini 统一加载与热更新
-from wtfutil import singleinstance # 单实例运行
-from wtfutil import util       # 杂项工具（UniqueQueue、measure_time、get_resource 等）
+from wtfutil import fileutil, httputil, procutil
+
+text = fileutil.read_text("example.txt")
+session = httputil.requests_session()
 ```
+
+这只适用于物理子模块，不表示包根重新导出子模块内的符号。`wtfutil/__init__.py` 不维护符号映射、按需懒加载或包级公开符号列表。
 
 - **查详细 API**：优先打开 `docs/zh/<module>.md` 或 `docs/en/<module>.md`（如 `docs/zh/httputil.md`）。
 - **快速入门**：根目录 `README.md` / `README_zh.md`（安装、示例、模块索引链接）。
+- **迁移规则**：遇到 `from wtfutil import Symbol` 或 `import wtfutil; wtfutil.Symbol`，应查明 `Symbol` 所属模块并改为 `from wtfutil.<module> import Symbol`；混合模块导入必须拆分。
 
 ---
 
 ### 2. 主要模块及用途
 
-- `wtfutil/_base.py`
-  - 私有底层模块（**不含任何 wtfutil 内部依赖**），供各子模块安全导入。
-  - 包含：`get_resource(filename)`、`get_resource_dir(basedir=None)`。
-  - 这两个函数同时通过 `wtfutil.util` 与 `wtfutil.__init__` 重新导出。
+- `wtfutil/_resource.py`
+  - 私有资源路径解析层（**不含任何 wtfutil 内部依赖**），供 `util` 与 `configutil` 安全导入。
+  - 接收显式锚点路径，不通过调用栈推断内部调用者；不得作为公开 API 写入用户示例。
 
 - `wtfutil/util.py`
   - **杂项工具**（不再聚合子模块）：
-    - `UniqueQueue`：去重队列（相同 dict 内容重复 put 会被忽略）。
+    - `UniqueQueue`：生命周期内去重队列（嵌套容器内容等价时重复 put 会被忽略）。
     - `measure_time`：计时装饰器。
     - `unique_items`、`cut_list`、`group_data`：列表/分组工具。
     - `current_datetime`、`format_datetime`、`parse_datetime`：日期时间。
-    - `get_resource` / `get_resource_dir`：re-export 自 `_base`。
+    - `get_resource` / `get_resource_dir`：公开资源解析包装器；底层委托给 `_resource`。
 
 - `wtfutil/httputil.py`
   - HTTP 工具封装：
-    - `requests_session`：带代理、重试、超时、SSL 处理、分块传输、速率限制等增强能力的会话工厂。
+    - `requests_session`：带代理、重试、超时、TLS、分块传输、速率限制等增强能力的会话工厂；默认校验证书。
+    - 导入模块不修改全局 SSL、requests、urllib3 或系统代理；兼容补丁必须由调用方显式启用。
     - `httpraw`：发送原始 HTTP 报文。
     - URL/IP/域名工具：`is_private_ip`、`get_maindomain`、`url2ip`、`is_wildcard_dns_batch` 等。
     - TLS 适配器：`CustomSslContextHttpAdapter`、`DESAdapter`。
@@ -70,6 +68,7 @@ from wtfutil import util       # 杂项工具（UniqueQueue、measure_time、get
     - 字符串哈希（MD5 / SHA1 / SHA256）。
     - RSA / DES 加解密。
     - 其他工具（前后缀处理、随机字符串、大小写随机、UTF-7、ghost bits 等）。
+    - 不提供不受信任 pickle 的反序列化 API；`base64unpickle` 已移除。
 
 - `wtfutil/sqlutil.py`
   - 数据库封装：
@@ -78,9 +77,9 @@ from wtfutil import util       # 杂项工具（UniqueQueue、measure_time、get
     - `ScriptRunner`：多语句 SQL 脚本执行器。
 
 - `wtfutil/procutil.py`
-  - 进程管理（**仅 Windows 有效**）：
-    - 按名称或 PID 查找进程；按脚本路径或命令行模式查找 Python 进程。
-    - 挂起 / 恢复 / 杀死指定进程。
+  - 进程管理（基于 `psutil`，**跨平台**）：按名称 / 脚本路径 / 命令行查找与结束 Python 进程。
+  - 挂起 / 恢复线程：**仅 Windows**（非 Windows 调用抛 `OSError`）；不依赖 `pywin32`。
+  - Windows ctypes 后端位于私有模块 `_winproc.py`，并只在 Windows 挂起 / 恢复路径中按需导入。
 
 - `wtfutil/configutil.py`
   - 统一 `wtfconfig.ini` 加载：`get_wtfconfig_path` / `merge_section` / `ensure_section` / `reload_wtfconfig`。
@@ -95,7 +94,7 @@ from wtfutil import util       # 杂项工具（UniqueQueue、measure_time、get
     - **不在模块级添加任何 logging Handler**（符合库规范，由调用方配置）。
 
 - `wtfutil/translateutil.py`
-  - 百度翻译封装：`BaiduTranslateApi(appid, appkey).translate(query, from_lang, to_lang)`。
+  - 百度翻译封装：`BaiduTranslateApi(appid, appkey).translate(query, from_lang, to_lang)`；接口错误抛 `BaiduTranslateError`。
 
 - `wtfutil/memshellutil.py`
   - MemShellParty HTTP 客户端：`MemShellParty(base_url=...).generate(...)` 生成内存马；`get_config` / `get_packers_tree` / `get_command_configs`。
@@ -106,7 +105,7 @@ from wtfutil import util       # 杂项工具（UniqueQueue、measure_time、get
   - 文档：`docs/en/memshellutil.md`、`docs/zh/memshellutil.md`；测试：`tests/test_memshell.py`（含可选 live 联调）。
 
 - `wtfutil/memshell.py`
-  - **CLI 工具**（`console_scripts`：`memshell=wtfutil.memshell:main`），**不在** `__init__.py` / `__all__`。
+  - **CLI 实现模块**（`console_scripts`：`memshell=wtfutil.memshell:main`），不属于公开 SDK 子模块。
   - 子命令：`generate`（`-o` 只写 packResult）、`config` / `packers` / `command-configs`、`install-skill`（`--global` / `--project` → `.agents/skills`）。
   - Skill 源：`wtfutil/skills/memshell/SKILL.md`。
 
@@ -123,7 +122,7 @@ from wtfutil import util       # 杂项工具（UniqueQueue、measure_time、get
     - 文档：`docs/en/singleinstance.md`、`docs/zh/singleinstance.md`
 
 - `wtfutil/pykill.py`
-  - **CLI 工具**（`pyproject.toml` → `console_scripts`：`pykill=wtfutil.pykill:main`），**不在** `__init__.py` / `__all__`。
+  - **CLI 实现模块**（`pyproject.toml` → `console_scripts`：`pykill=wtfutil.pykill:main`），不属于公开 SDK 子模块。
   - 列出/终止 Python 进程，封装 `procutil` + Rich + questionary。
   - 文档：`docs/en/pykill.md`、`docs/zh/pykill.md`；README 有「命令行与单实例」摘要。
 
@@ -131,23 +130,22 @@ from wtfutil import util       # 杂项工具（UniqueQueue、measure_time、get
 
 ### 3. 依赖层级（循环引用规则）
 
+包根 `wtfutil/__init__.py` 不聚合公开符号。子模块之间遵守：
+
 ```
-_base.py（纯 stdlib，零 wtfutil 依赖）
-      ↑
-configutil.py（configobj + get_resource；统一 wtfconfig 加载）
-fileutil / httputil / strutil / sqlutil / procutil / singleinstance
-      ↑
-notifyutil（from .configutil + from .httputil；_req 延迟初始化）
-imgutil（from .configutil + from .httputil；ensure 热加载）
-translateutil（from . import util，仅方法内使用）
-memshellutil（from .configutil + from .httputil；ensure 热加载）
-      ↑
-util.py（杂项工具；re-export get_resource from _base）
-      ↑
-__init__.py（显式导出所有公开符号，不使用 wildcard import）
+_resource.py（纯 stdlib，零 wtfutil 依赖）
+├── configutil.py（统一 wtfconfig 加载）
+└── util.py（公开资源路径函数）
+
+httputil.py ──> strutil.py
+notifyutil.py / imgutil.py / memshellutil.py ──> configutil.py + httputil.py
+translateutil.py ──> httputil.py + strutil.py
+
+procutil.py ──(仅 Windows 挂起/恢复路径)──> _winproc.py
+fileutil.py / sqlutil.py / singleinstance.py（无其它 wtfutil 模块依赖）
 ```
 
-**规则**：子模块若需要 `get_resource`，直接 `from ._base import get_resource`，**不得** `from . import util` 后在模块级调用 util 的函数（会造成循环引用）。配置读取统一走 `configutil`，不要各自 `ConfigObj`。
+**规则**：公开代码从 `wtfutil.util` 使用 `get_resource`；内部底层模块若需要资源解析，应直接依赖 `_resource` 的显式锚点函数，不得通过 `from . import util` 间接获取。配置读取统一走 `configutil`，不要各自创建 `ConfigObj`。
 
 ---
 
@@ -169,11 +167,11 @@ __init__.py（显式导出所有公开符号，不使用 wildcard import）
 **每次新增或变更对外公开 API（新模块、新函数、新配置项等）时，Agent 必须同步：**
 
 1. 更新对应子模块的 `__all__`。
-2. 更新 `wtfutil/__init__.py` 的显式导入列表与 `__all__`。
-3. 更新 **`docs/en/<module>.md`** 与 **`docs/zh/<module>.md`**（该模块的完整 API 说明）。
-4. 若新增模块或配置段：更新根 `README.md` / `README_zh.md` 的模块索引表或配置摘要，并更新 [`docs/README.md`](docs/README.md) 索引。
-5. 更新本文件 `AGENTS.md` 第 2 节中对应模块的简要说明（一行级）。
-6. **同步或补充测试用例**（`tests/`，stdlib `unittest` 即可）：覆盖核心行为、边界与错误路径；涉及外部 HTTP 服务的可增加 live 用例，并用环境变量（如 `MEMSHELL_SKIP_LIVE=1`）支持跳过联调。改完后应能跑通相关测试。
+2. 更新 **`docs/en/<module>.md`** 与 **`docs/zh/<module>.md`**（该模块的完整 API 说明）。
+3. **同步或补充测试用例**（`tests/`，stdlib `unittest` 即可）：覆盖核心行为、边界与错误路径；外部 HTTP live 用例必须默认跳过，并用显式环境变量（如 `MEMSHELL_RUN_LIVE=1`）启用。改完后应能跑通相关测试。
+4. 若新增公开子模块或配置段，再更新根 `README.md` / `README_zh.md` 的模块索引或配置摘要、[`docs/README.md`](docs/README.md) 索引，以及本文件第 2 节的模块简介。
+
+无需在包根 `__init__.py` 维护公开符号映射，也没有包根类型声明文件的同步要求。
 
 ---
 

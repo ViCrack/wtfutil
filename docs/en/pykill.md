@@ -1,8 +1,8 @@
 # pykill (CLI)
 
-Interactive CLI to list and kill Python processes. Installed as a **console script** (`pip install wtfutil` → `pykill` on PATH). Not exported in `wtfutil.__all__`; implementation: `wtfutil/pykill.py`.
+Interactive CLI to list and kill Python processes. Installed as a **console script** (`pip install wtfutil` → `pykill` on PATH). Its `wtfutil.pykill` implementation module is a CLI entry point, not a public SDK submodule.
 
-Built on `wtfutil.procutil` (Windows-oriented process APIs) plus `psutil`, `rich`, and `questionary`.
+Built on `wtfutil.procutil` (find/kill via `psutil`, cross-platform) plus `rich` and `questionary`.
 
 ## Usage
 
@@ -27,7 +27,7 @@ pykill -l                             # list all Python processes only
 - Table columns: PID, process name, script, absolute path, cwd, full cmdline.
 - Kill uses `psutil.Process(pid).kill()`; reports success, already exited, or access denied.
 
-## Programmatic use
+## Internal entry point (not SDK)
 
 ```python
 from wtfutil.pykill import main
@@ -35,4 +35,4 @@ from wtfutil.pykill import main
 raise SystemExit(main())
 ```
 
-Prefer `procutil` APIs when embedding in your own scripts: `kill_python_processes_by_script`, `kill_python_processes_by_cmdline`, etc. See [procutil.md](procutil.md).
+The entry point above is shown for CLI integration only and is not a stable SDK API. Prefer `wtfutil.procutil` APIs when embedding in your own scripts: `kill_python_processes_by_script`, `kill_python_processes_by_cmdline`, etc. See [procutil.md](procutil.md).

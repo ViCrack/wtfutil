@@ -9,12 +9,13 @@ from __future__ import annotations
 
 import copy
 import os
+from collections import OrderedDict
 from pathlib import Path
 from typing import Any, Iterable, Mapping
 
 from configobj import ConfigObj
 
-from ._base import get_resource
+from ._resource import resolve_resource_path
 
 _WTFCONFIG_NAME = "wtfconfig.ini"
 
@@ -24,13 +25,17 @@ _cached_mtime: float | None = None
 _cached_cfg: ConfigObj | None = None
 _file_loaded: bool = False  # 是否已尝试加载过（含文件不存在）
 
-# ensure_section：记录 (id(target), section) -> 已应用的 (path, mtime)；mtime 用 None 表示无文件
-_applied: dict[tuple[int, str], tuple[str | None, float | None]] = {}
+# 保存目标对象本身可防止 id 重用误命中；容量上限避免短生命周期 dict 无限增长。
+_APPLIED_CACHE_MAXSIZE = 256
+_applied: OrderedDict[
+    int,
+    tuple[dict, tuple[Any, ...]],
+] = OrderedDict()
 
 
 def get_wtfconfig_path() -> str | None:
     """解析 wtfconfig.ini：当前目录 → resource/ → ~/"""
-    return get_resource(_WTFCONFIG_NAME)
+    return resolve_resource_path(_WTFCONFIG_NAME, anchor_path=__file__)
 
 
 def reload_wtfconfig() -> None:
@@ -80,6 +85,36 @@ def _current_signature() -> tuple[str | None, float | None]:
     if not path or not Path(path).exists():
         return None, None
     return path, _stat_mtime(path)
+
+
+def _build_application_signature(
+    defaults: Mapping[str, Any],
+    section: str,
+    *,
+    uppercase_keys: bool,
+    env_map: Mapping[str, str] | None,
+) -> tuple[Any, ...]:
+    """构建影响合并结果的完整签名，包括环境变量当前值。"""
+    normalized_env_map = dict(env_map or {})
+    environment_names = {
+        normalized_env_map.get(config_key, config_key)
+        for config_key in defaults
+    }
+    environment_names.update(normalized_env_map.values())
+    environment_signature = tuple(
+        sorted(
+            (environment_name, os.getenv(environment_name))
+            for environment_name in environment_names
+        )
+    )
+    return (
+        _current_signature(),
+        section,
+        uppercase_keys,
+        copy.deepcopy(dict(defaults)),
+        tuple(sorted(normalized_env_map.items())),
+        environment_signature,
+    )
 
 
 def merge_section(
@@ -140,16 +175,34 @@ def ensure_section(
     若首次或 ini mtime 变化（或 force_reload）：用 merge_section 结果更新 target，返回 True。
     否则不动 target（保留运行时临时改写），返回 False。
     """
-    key = (id(target), section)
-    sig = _current_signature()
+    key = id(target)
 
     if force_reload:
         reload_wtfconfig()
-        sig = _current_signature()
 
-    if not force_reload and key in _applied and _applied[key] == sig:
+    application_signature = _build_application_signature(
+        defaults,
+        section,
+        uppercase_keys=uppercase_keys,
+        env_map=env_map,
+    )
+
+    cached_application = _applied.get(key)
+    target_is_cached = (
+        cached_application is not None
+        and cached_application[0] is target
+    )
+    if (
+        not force_reload
+        and target_is_cached
+        and cached_application[1] == application_signature
+    ):
+        _applied.move_to_end(key)
         # 签名未变：仍可能需要确认缓存与磁盘一致（path 切换等已含在 sig）
         return False
+
+    if cached_application is not None and not target_is_cached:
+        del _applied[key]
 
     merged = merge_section(
         defaults,
@@ -160,7 +213,10 @@ def ensure_section(
     )
     target.clear()
     target.update(merged)
-    _applied[key] = sig
+    _applied[key] = (target, application_signature)
+    _applied.move_to_end(key)
+    while len(_applied) > _APPLIED_CACHE_MAXSIZE:
+        _applied.popitem(last=False)
     return True
 
 

@@ -4,6 +4,8 @@
 import os
 import sys
 import tempfile
+from functools import wraps
+
 import portalocker
 
 
@@ -64,21 +66,29 @@ class SingleInstance:
         try:
             self._lock_file = open(self.lockfile_path, 'w')
             portalocker.lock(self._lock_file, portalocker.LOCK_EX | portalocker.LOCK_NB)
-        except portalocker.exceptions.LockException:
-            raise SingleInstanceException(
-                f"已有实例正在运行，锁文件：{self.lockfile_path}"
-            )
+        except BaseException as exc:
+            if self._lock_file is not None:
+                self._lock_file.close()
+                self._lock_file = None
+            if isinstance(exc, portalocker.exceptions.LockException):
+                raise SingleInstanceException(
+                    f"已有实例正在运行，锁文件：{self.lockfile_path}"
+                ) from exc
+            raise
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
-        # 释放锁并删除锁文件
+        # 锁文件可安全复用；不删除可避免解锁与删除之间的并发竞态。
+        lock_file = self._lock_file
+        self._lock_file = None
+        if lock_file is None:
+            return
         try:
-            if self._lock_file:
-                portalocker.unlock(self._lock_file)
-                self._lock_file.close()
-            os.remove(self.lockfile_path)
-        except Exception:
+            portalocker.unlock(lock_file)
+        except (OSError, portalocker.exceptions.LockException):
             pass
+        finally:
+            lock_file.close()
 
 
 def single_instance(flavor_id="", lockfile=""):
@@ -91,6 +101,7 @@ def single_instance(flavor_id="", lockfile=""):
     """
 
     def decorator(func):
+        @wraps(func)
         def wrapper(*args, **kwargs):
             with SingleInstance(flavor_id=flavor_id, lockfile=lockfile):
                 return func(*args, **kwargs)

@@ -3,7 +3,7 @@
 统一读取 `wtfconfig.ini`，支持按段合并与文件 mtime 热加载。
 
 ```python
-from wtfutil import ensure_section, merge_section, reload_wtfconfig, get_wtfconfig_path
+from wtfutil.configutil import ensure_section, get_wtfconfig_path, merge_section, reload_wtfconfig
 
 defaults = {"BASE_URL": "https://party.mem.mk"}
 cfg = {}
@@ -21,8 +21,9 @@ ensure_section(cfg, defaults, "memshell", uppercase_keys=True, env_map={"BASE_UR
 ## 热加载
 
 - 整文件按 `path + mtime` 缓存。
-- `ensure_section`：仅**首次**或 **mtime/路径变化**（或 `force_reload=True`）时 `target.clear(); update(merged)`，返回 `True`。
+- `ensure_section`：首次、mtime/路径变化、段/默认值/环境映射变化、相关环境变量值变化（或 `force_reload=True`）时执行 `target.clear(); update(merged)`，返回 `True`。
 - 签名未变时不改 `target`，保留运行时手动改写。
+- 每个目标只保留最近一次应用签名和对象身份，避免目标切换段后误命中旧缓存；记录限制为最近 256 个目标。
 - `reload_wtfconfig()`：丢弃缓存，下次必重读。
 
 ## API

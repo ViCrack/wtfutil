@@ -13,7 +13,7 @@ Guide for **Python SDK callers**: call the [MemShellParty](https://github.com/Re
 ## Quick start
 
 ```python
-from wtfutil import MemShellParty, MemShellPartyError
+from wtfutil.memshellutil import MemShellParty, MemShellPartyError
 
 with MemShellParty() as client:
     result = client.generate(
@@ -29,11 +29,9 @@ with MemShellParty() as client:
     print(info["shellClassName"], info["injectorClassName"])
 ```
 
-Import either way:
+Import SDK APIs from their owning public submodule:
 
 ```python
-from wtfutil import MemShellParty
-# or
 from wtfutil.memshellutil import MemShellParty
 ```
 
@@ -217,7 +215,7 @@ print(mem["shellToolConfig"])  # includes real passwords if they were left empty
 For compact metadata without a large `packResult`:
 
 ```python
-from wtfutil import extract_generate_meta
+from wtfutil.memshellutil import extract_generate_meta
 
 meta = extract_generate_meta(result)
 # shellClassName / injectorClassName / shellToolConfig / hasPackResult ...
@@ -277,7 +275,7 @@ result = client.generate(body=body, jre=9)
 Build the request without sending:
 
 ```python
-from wtfutil import build_generate_body
+from wtfutil.memshellutil import build_generate_body
 
 req = build_generate_body(shell_tool="Godzilla", password="p", key="k", header_value="h")
 result = client.generate(body=req)
@@ -296,7 +294,7 @@ Failures raise `MemShellPartyError`:
 | `e.body` | Raw body (dict or text snippet) |
 
 ```python
-from wtfutil import MemShellParty, MemShellPartyError
+from wtfutil.memshellutil import MemShellParty, MemShellPartyError
 
 try:
     with MemShellParty() as client:
@@ -328,7 +326,7 @@ Typical causes: illegal combo, unreachable host, non-JSON response, timeout. Tra
 
 ## CLI (optional)
 
-The `memshell` console script ships with the package (not in `__all__`). Prefer the SDK for humans and app code; CLI suits automation / agents.
+The `memshell` console script ships with the package. Its `wtfutil.memshell` implementation module is a CLI entry point, not a public SDK submodule; use `wtfutil.memshellutil` from Python code. The CLI suits automation and agents.
 
 ```bash
 memshell generate --help
@@ -353,6 +351,6 @@ Flags mirror the kwargs table above; see `memshell generate --help`.
 
 ```bash
 python -m unittest tests.test_memshell
-# skip live calls to party.mem.mk:
-set MEMSHELL_SKIP_LIVE=1
+# live calls are skipped by default; explicitly enable them:
+set MEMSHELL_RUN_LIVE=1
 ```
