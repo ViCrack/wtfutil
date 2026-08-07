@@ -26,7 +26,6 @@ from requests.adapters import HTTPAdapter
 from requests.exceptions import JSONDecodeError
 from requests.packages.urllib3.util.ssl_ import create_urllib3_context
 from requests.utils import to_native_string
-from requests_cache import CachedSession
 from requests_toolbelt.utils import dump
 from rich.progress import Progress
 
@@ -604,6 +603,8 @@ def requests_session(
         TypeError: 如果 proxies 类型无效。
     """
     if use_cache:
+        from requests_cache import CachedSession
+
         if isinstance(use_cache, dict):
             session = CachedSession(**use_cache)
         else:
