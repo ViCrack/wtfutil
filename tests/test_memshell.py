@@ -62,20 +62,20 @@ class TestResolveShellCredentials(unittest.TestCase):
         self.assertEqual(c["behinder_pass"], "")
 
     def test_pass_maps_antsword(self):
-        c = resolve_shell_credentials("AntSword", password="ap")
-        self.assertEqual(c["ant_sword_pass"], "ap")
+        c = resolve_shell_credentials("AntSword", password="example-pass")
+        self.assertEqual(c["ant_sword_pass"], "example-pass")
 
     def test_specific_overrides_generic(self):
         c = resolve_shell_credentials(
             "Behinder",
-            password="generic",
-            behinder_pass="specific",
+            password="example-generic-pass",
+            behinder_pass="example-specific-pass",
         )
-        self.assertEqual(c["behinder_pass"], "specific")
+        self.assertEqual(c["behinder_pass"], "example-specific-pass")
 
     def test_build_body_password_convenience(self):
-        body = build_generate_body(shell_tool="Behinder", password="via")
-        self.assertEqual(body["shellToolConfig"]["behinderPass"], "via")
+        body = build_generate_body(shell_tool="Behinder", password="example-pass")
+        self.assertEqual(body["shellToolConfig"]["behinderPass"], "example-pass")
         body2 = build_generate_body(shell_tool="Godzilla", password="example-pass", key="example-key")
         self.assertEqual(body2["shellToolConfig"]["godzillaPass"], "example-pass")
         self.assertEqual(body2["shellToolConfig"]["godzillaKey"], "example-key")
@@ -220,11 +220,11 @@ class TestBuildGenerateBody(unittest.TestCase):
     def test_camelcase_official_fields(self):
         body = build_generate_body(
             behinder_pass="example-pass",
-            header_value="v",
+            header_value="example-token",
             target_jre_version="61",
         )
         self.assertEqual(body["shellToolConfig"]["behinderPass"], "example-pass")
-        self.assertEqual(body["shellToolConfig"]["headerValue"], "v")
+        self.assertEqual(body["shellToolConfig"]["headerValue"], "example-token")
         self.assertEqual(body["shellConfig"]["targetJreVersion"], 61)
         self.assertTrue(body["shellConfig"]["byPassJavaModule"])
 
@@ -232,7 +232,7 @@ class TestBuildGenerateBody(unittest.TestCase):
 class TestExtractGenerateMeta(unittest.TestCase):
     def test_strips_bytes_and_exposes_output(self):
         result = {
-            "packResult": "PAYLOAD" * 100,
+            "packResult": "example-payload-" * 100,
             "memShellResult": {
                 "shellClassName": "a.b.Shell",
                 "injectorClassName": "a.b.Inj",
@@ -625,7 +625,7 @@ class TestMemshellCli(unittest.TestCase):
 
     def test_cli_case_insensitive_and_hidden_flags(self):
         fake_result = {
-            "packResult": "X",
+            "packResult": "example-case-insensitive-payload",
             "memShellResult": {
                 "shellClassName": "S",
                 "injectorClassName": "I",
@@ -652,7 +652,7 @@ class TestMemshellCli(unittest.TestCase):
                             "--jre",
                             "9",
                             "--behinder-pass",
-                            "hidden-ok",
+                            "example-pass",
                             "--target-jre-version",
                             "8",
                             "-o",
@@ -665,13 +665,13 @@ class TestMemshellCli(unittest.TestCase):
             self.assertEqual(kwargs.get("shell_tool"), "behinder")
             self.assertEqual(kwargs.get("shell_type"), "filter")
             self.assertEqual(kwargs.get("jre"), "9")
-            self.assertEqual(kwargs.get("behinder_pass"), "hidden-ok")
+            self.assertEqual(kwargs.get("behinder_pass"), "example-pass")
             # --jre 优先，不应再带 target_jre_version
             self.assertNotIn("target_jre_version", kwargs)
 
     def test_cli_hidden_target_jre_still_works(self):
         fake_result = {
-            "packResult": "Y",
+            "packResult": "example-target-jre-payload",
             "memShellResult": {
                 "shellClassName": "S",
                 "injectorClassName": "I",
@@ -748,6 +748,36 @@ class TestMemshellCli(unittest.TestCase):
         message = error_output.getvalue()
         self.assertEqual(code, 1)
         self.assertIn("I/O error [Errno 5]", message)
+        self.assertNotIn("example-sensitive", message)
+        self.assertNotIn("Traceback", message)
+
+    def test_cli_redacts_invalid_json_input(self):
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            body_path = Path(temporary_directory) / "example-body.json"
+            body_path.write_text("{example-sensitive-json-content", encoding="utf-8")
+            error_output = io.StringIO()
+
+            with mock.patch("sys.stderr", error_output):
+                code = memshell_main(["generate", "--body", str(body_path)])
+
+        message = error_output.getvalue()
+        self.assertEqual(code, 1)
+        self.assertIn("invalid JSON input", message)
+        self.assertNotIn("example-sensitive", message)
+        self.assertNotIn("Traceback", message)
+
+    def test_cli_redacts_invalid_utf8_input(self):
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            body_path = Path(temporary_directory) / "example-body.json"
+            body_path.write_bytes(b"\xffexample-sensitive-utf8-content")
+            error_output = io.StringIO()
+
+            with mock.patch("sys.stderr", error_output):
+                code = memshell_main(["generate", "--body", str(body_path)])
+
+        message = error_output.getvalue()
+        self.assertEqual(code, 1)
+        self.assertIn("invalid UTF-8 input", message)
         self.assertNotIn("example-sensitive", message)
         self.assertNotIn("Traceback", message)
 
@@ -861,8 +891,8 @@ class TestMemShellPartyLive(unittest.TestCase):
                 shell_tool="Behinder",
                 shell_type="Listener",
                 target_jre_version=50,
-                behinder_pass="testpass",
-                header_value="testua",
+                behinder_pass="example-pass",
+                header_value="example-token",
                 packer="DefaultBase64",
             )
         self.assertTrue(result.get("packResult"))
@@ -885,9 +915,9 @@ class TestMemShellPartyLive(unittest.TestCase):
                         "--shell-type",
                         "Listener",
                         "--password",
-                        "clipass",
+                        "example-pass",
                         "--header-value",
-                        "clihdr",
+                        "example-token",
                         "-o",
                         str(out),
                     ]
