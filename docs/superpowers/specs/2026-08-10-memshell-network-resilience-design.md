@@ -54,14 +54,14 @@ MemShellParty(
 参数语义：
 
 - `connect_retries`：连接阶段失败后的最大重试次数；`0` 表示关闭自动重试。
-- `retry_backoff`：urllib3 Retry 使用的退避因子；必须大于等于 `0`。
+- `retry_backoff`：urllib3 Retry 使用的退避因子；必须是有限的非负数。
 - 两个参数只应用于客户端内部创建的 session。
 - 传入外部 `session=` 时不挂载或替换调用方的 adapter；调用方继续完全控制重试策略。
 
 参数校验：
 
 - `connect_retries` 必须是大于等于 `0` 的整数，布尔值不作为整数接受。
-- `retry_backoff` 必须可转换为大于等于 `0` 的浮点数。
+- `retry_backoff` 必须可转换为有限的非负浮点数；`NaN` 和无穷值均拒绝。
 - 非法参数抛出 `ValueError` 或 `TypeError`，沿用项目现有参数错误风格。
 
 ## 重试策略

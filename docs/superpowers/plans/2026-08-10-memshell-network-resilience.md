@@ -89,11 +89,7 @@ git commit -m "docs: 增加敏感信息保护规则"
     def test_internal_session_uses_connect_only_retry(self, session_factory):
         session_factory.return_value = mock.Mock()
 
-        client = MemShellParty(
-            base_url="https://example.test",
-            connect_retries=2,
-            retry_backoff=0.25,
-        )
+        client = MemShellParty(base_url="https://example.test")
 
         retry = session_factory.call_args.kwargs["max_retries"]
         self.assertEqual(retry.total, 2)
@@ -127,7 +123,7 @@ git commit -m "docs: 增加敏感信息保护规则"
                 with self.assertRaises((TypeError, ValueError)):
                     MemShellParty(connect_retries=value)
 
-        for value in (-0.1, "invalid", True):
+        for value in (-0.1, "invalid", True, float("nan"), float("inf"), float("-inf")):
             with self.subTest(retry_backoff=value):
                 with self.assertRaises((TypeError, ValueError)):
                     MemShellParty(retry_backoff=value)
@@ -174,6 +170,8 @@ python -m unittest tests.test_memshell.TestMemShellPartyClient -v
 在导入区加入：
 
 ```python
+import math
+
 from urllib3.util import Retry
 ```
 
@@ -193,13 +191,13 @@ from urllib3.util import Retry
         if connect_retries < 0:
             raise ValueError("connect_retries must be a non-negative integer")
         if isinstance(retry_backoff, bool):
-            raise TypeError("retry_backoff must be a non-negative number")
+            raise TypeError("retry_backoff must be a finite non-negative number")
         try:
             retry_backoff_value = float(retry_backoff)
         except (TypeError, ValueError) as exc:
-            raise TypeError("retry_backoff must be a non-negative number") from exc
-        if retry_backoff_value < 0:
-            raise ValueError("retry_backoff must be a non-negative number")
+            raise TypeError("retry_backoff must be a finite non-negative number") from exc
+        if retry_backoff_value < 0 or not math.isfinite(retry_backoff_value):
+            raise ValueError("retry_backoff must be a finite non-negative number")
 
         _load_memshell_config()
         self.base_url = (base_url or memshell_config.get("BASE_URL") or DEFAULT_BASE_URL).rstrip("/")
@@ -519,7 +517,7 @@ python -m unittest tests.test_memshell.TestMemshellCli.test_cli_reports_wrapped_
 
 ```markdown
 | `connect_retries` | `2` | 仅重试连接阶段失败；`0` 表示关闭 |
-| `retry_backoff` | `0.25` | 连接重试退避因子，必须大于等于 `0` |
+| `retry_backoff` | `0.25` | 连接重试退避因子，必须是有限的非负数 |
 ```
 
 在错误处理章节将“网络层异常可能直接抛出”改为：
@@ -534,7 +532,7 @@ python -m unittest tests.test_memshell.TestMemshellCli.test_cli_reports_wrapped_
 
 ```markdown
 | `connect_retries` | `2` | Retry connection-establishment failures only; `0` disables retries |
-| `retry_backoff` | `0.25` | Connection retry backoff factor; must be non-negative |
+| `retry_backoff` | `0.25` | Connection retry backoff factor; must be finite and non-negative |
 ```
 
 错误说明使用：

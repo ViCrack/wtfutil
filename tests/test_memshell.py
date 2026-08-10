@@ -293,11 +293,7 @@ class TestMemShellPartyClient(unittest.TestCase):
     def test_internal_session_uses_connect_only_retry(self, session_factory):
         session_factory.return_value = mock.Mock()
 
-        client = MemShellParty(
-            base_url="https://example.test",
-            connect_retries=2,
-            retry_backoff=0.25,
-        )
+        client = MemShellParty(base_url="https://example.test")
 
         retry = session_factory.call_args.kwargs["max_retries"]
         self.assertEqual(retry.total, 2)
@@ -327,7 +323,7 @@ class TestMemShellPartyClient(unittest.TestCase):
                 with self.assertRaises((TypeError, ValueError)):
                     MemShellParty(connect_retries=value)
 
-        for value in (-0.1, "invalid", True):
+        for value in (-0.1, "invalid", True, float("nan"), float("inf"), float("-inf")):
             with self.subTest(retry_backoff=value):
                 with self.assertRaises((TypeError, ValueError)):
                     MemShellParty(retry_backoff=value)

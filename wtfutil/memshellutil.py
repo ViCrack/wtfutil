@@ -7,6 +7,7 @@ MemShellParty HTTP API 客户端：生成内存马 / 查询配置。
 
 from __future__ import annotations
 
+import math
 from typing import Any
 
 from requests import Session
@@ -500,20 +501,20 @@ class MemShellParty:
         :param timeout: 请求超时（秒）
         :param session: 可选复用的 requests session；未传则内部创建并在 close 时关闭
         :param connect_retries: 内部 session 的连接失败重试次数；0 表示禁用
-        :param retry_backoff: 内部 session 的连接重试退避因子
+        :param retry_backoff: 内部 session 的有限非负连接重试退避因子
         """
         if isinstance(connect_retries, bool) or not isinstance(connect_retries, int):
             raise TypeError("connect_retries must be a non-negative integer")
         if connect_retries < 0:
             raise ValueError("connect_retries must be a non-negative integer")
         if isinstance(retry_backoff, bool):
-            raise TypeError("retry_backoff must be a non-negative number")
+            raise TypeError("retry_backoff must be a finite non-negative number")
         try:
             retry_backoff_value = float(retry_backoff)
         except (TypeError, ValueError) as exc:
-            raise TypeError("retry_backoff must be a non-negative number") from exc
-        if retry_backoff_value < 0:
-            raise ValueError("retry_backoff must be a non-negative number")
+            raise TypeError("retry_backoff must be a finite non-negative number") from exc
+        if retry_backoff_value < 0 or not math.isfinite(retry_backoff_value):
+            raise ValueError("retry_backoff must be a finite non-negative number")
 
         _load_memshell_config()
         self.base_url = (base_url or memshell_config.get("BASE_URL") or DEFAULT_BASE_URL).rstrip("/")
