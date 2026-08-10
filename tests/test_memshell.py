@@ -43,14 +43,14 @@ def _fake_resp(data, status_code: int = 200):
 
 class TestResolveShellCredentials(unittest.TestCase):
     def test_pass_maps_behinder(self):
-        c = resolve_shell_credentials("Behinder", password="p1")
-        self.assertEqual(c["behinder_pass"], "p1")
+        c = resolve_shell_credentials("Behinder", password="example-pass")
+        self.assertEqual(c["behinder_pass"], "example-pass")
         self.assertEqual(c["godzilla_pass"], "")
         self.assertEqual(c["ant_sword_pass"], "")
 
     def test_pass_maps_case_insensitive(self):
-        c = resolve_shell_credentials("behinder", password="p1")
-        self.assertEqual(c["behinder_pass"], "p1")
+        c = resolve_shell_credentials("behinder", password="example-pass")
+        self.assertEqual(c["behinder_pass"], "example-pass")
         c2 = resolve_shell_credentials("GODZILLA", password="example-pass", key="example-key")
         self.assertEqual(c2["godzilla_pass"], "example-pass")
         self.assertEqual(c2["godzilla_key"], "example-key")
@@ -76,9 +76,9 @@ class TestResolveShellCredentials(unittest.TestCase):
     def test_build_body_password_convenience(self):
         body = build_generate_body(shell_tool="Behinder", password="via")
         self.assertEqual(body["shellToolConfig"]["behinderPass"], "via")
-        body2 = build_generate_body(shell_tool="Godzilla", password="p", key="k")
-        self.assertEqual(body2["shellToolConfig"]["godzillaPass"], "p")
-        self.assertEqual(body2["shellToolConfig"]["godzillaKey"], "k")
+        body2 = build_generate_body(shell_tool="Godzilla", password="example-pass", key="example-key")
+        self.assertEqual(body2["shellToolConfig"]["godzillaPass"], "example-pass")
+        self.assertEqual(body2["shellToolConfig"]["godzillaKey"], "example-key")
 
 
 class TestBuildGenerateBody(unittest.TestCase):
@@ -128,14 +128,14 @@ class TestBuildGenerateBody(unittest.TestCase):
             server="tomcat",
             shell_tool="GODZILLA",
             shell_type="filter",
-            password="p",
-            key="k",
+            password="example-pass",
+            key="example-key",
         )
         self.assertEqual(body["shellConfig"]["server"], "Tomcat")
         self.assertEqual(body["shellConfig"]["shellTool"], "Godzilla")
         self.assertEqual(body["shellConfig"]["shellType"], "Filter")
-        self.assertEqual(body["shellToolConfig"]["godzillaPass"], "p")
-        self.assertEqual(body["shellToolConfig"]["godzillaKey"], "k")
+        self.assertEqual(body["shellToolConfig"]["godzillaPass"], "example-pass")
+        self.assertEqual(body["shellToolConfig"]["godzillaKey"], "example-key")
 
     def test_case_insensitive_via_body(self):
         body = build_generate_body(
@@ -151,18 +151,21 @@ class TestBuildGenerateBody(unittest.TestCase):
 
     def test_password_remaps_when_body_changes_tool(self):
         body = build_generate_body(
-            password="p",
-            key="k",
+            password="example-pass",
+            key="example-key",
             body={"shellConfig": {"shellTool": "godzilla"}},
         )
         self.assertEqual(body["shellConfig"]["shellTool"], "Godzilla")
-        self.assertEqual(body["shellToolConfig"]["godzillaPass"], "p")
-        self.assertEqual(body["shellToolConfig"]["godzillaKey"], "k")
+        self.assertEqual(body["shellToolConfig"]["godzillaPass"], "example-pass")
+        self.assertEqual(body["shellToolConfig"]["godzillaKey"], "example-key")
         self.assertEqual(body["shellToolConfig"]["behinderPass"], "")
 
-    def test_invalid_jre_raises(self):
-        with self.assertRaises(ValueError):
-            build_generate_body(jre="abc")
+    def test_invalid_jre_raises_without_echoing_input(self):
+        with self.assertRaises(ValueError) as ctx:
+            build_generate_body(jre="example-sensitive-jre")
+
+        self.assertEqual(str(ctx.exception), "invalid jre / target_jre_version")
+        self.assertNotIn("example-sensitive", str(ctx.exception))
 
     def test_command_defaults(self):
         body = build_generate_body(shell_tool="Command")
@@ -216,11 +219,11 @@ class TestBuildGenerateBody(unittest.TestCase):
 
     def test_camelcase_official_fields(self):
         body = build_generate_body(
-            behinder_pass="p",
+            behinder_pass="example-pass",
             header_value="v",
             target_jre_version="61",
         )
-        self.assertEqual(body["shellToolConfig"]["behinderPass"], "p")
+        self.assertEqual(body["shellToolConfig"]["behinderPass"], "example-pass")
         self.assertEqual(body["shellToolConfig"]["headerValue"], "v")
         self.assertEqual(body["shellConfig"]["targetJreVersion"], 61)
         self.assertTrue(body["shellConfig"]["byPassJavaModule"])
@@ -711,6 +714,68 @@ class TestMemshellCli(unittest.TestCase):
         self.assertEqual(code, 1)
         self.assertIn("body.shellConfig must be an object", error_output.getvalue())
         self.assertNotIn("Traceback", error_output.getvalue())
+
+    def test_cli_redacts_unwrapped_request_exception(self):
+        error_output = io.StringIO()
+        with mock.patch("wtfutil.memshell.MemShellParty") as client_class:
+            client_class.return_value.get_config.side_effect = RequestsConnectionError(
+                "proxy https://example-user:example-pass@proxy.example unavailable"
+            )
+            with mock.patch("sys.stderr", error_output):
+                code = memshell_main(["config"])
+
+        message = error_output.getvalue()
+        self.assertEqual(code, 1)
+        self.assertIn("request failed: transport error", message)
+        self.assertNotIn("example-user", message)
+        self.assertNotIn("example-pass", message)
+        self.assertNotIn("Traceback", message)
+
+    def test_cli_redacts_body_file_os_error(self):
+        error_output = io.StringIO()
+        file_error = OSError(
+            5,
+            "example-sensitive-os-detail",
+            "example-sensitive-body-path.json",
+        )
+        with mock.patch("builtins.open", side_effect=file_error), mock.patch(
+            "sys.stderr", error_output
+        ):
+            code = memshell_main(
+                ["generate", "--body", "example-sensitive-body-path.json"]
+            )
+
+        message = error_output.getvalue()
+        self.assertEqual(code, 1)
+        self.assertIn("I/O error [Errno 5]", message)
+        self.assertNotIn("example-sensitive", message)
+        self.assertNotIn("Traceback", message)
+
+    def test_cli_redacts_output_file_os_error(self):
+        error_output = io.StringIO()
+        file_error = OSError(
+            5,
+            "example-sensitive-os-detail",
+            "example-sensitive-output-path.txt",
+        )
+        with (
+            mock.patch("wtfutil.memshell.MemShellParty") as client_class,
+            mock.patch("pathlib.Path.write_text", side_effect=file_error),
+            mock.patch("sys.stderr", error_output),
+        ):
+            client_class.return_value.generate.return_value = {
+                "packResult": "example-generated-payload",
+                "memShellResult": {},
+            }
+            code = memshell_main(
+                ["generate", "-o", "example-sensitive-output-path.txt"]
+            )
+
+        message = error_output.getvalue()
+        self.assertEqual(code, 1)
+        self.assertIn("I/O error [Errno 5]", message)
+        self.assertNotIn("example-sensitive", message)
+        self.assertNotIn("Traceback", message)
 
     def test_cli_reports_wrapped_transport_error_without_traceback(self):
         error_output = io.StringIO()

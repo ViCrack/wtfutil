@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-# -*- coding: utf-8 -*-
 """
 memshell - MemShellParty 内存马生成 CLI（AI / 脚本友好）
 
@@ -97,11 +96,18 @@ def _cmd_command_configs(args: argparse.Namespace) -> int:
     return 0
 
 
+def _safe_os_error(exc: OSError) -> str:
+    error_number = exc.errno
+    if isinstance(error_number, int) and not isinstance(error_number, bool):
+        return f"I/O error [Errno {error_number}]"
+    return "I/O error"
+
+
 def _load_body_file(path: str) -> dict:
     with open(path, encoding="utf-8") as f:
         data = json.load(f)
     if not isinstance(data, dict):
-        raise ValueError("--body must be a JSON object")
+        raise TypeError("--body must be a JSON object")
     return data
 
 
@@ -425,10 +431,19 @@ def main(argv: list[str] | None = None) -> int:
     except MemShellPartyError as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 1
-    except RequestException as exc:
-        print(f"error: request failed: {exc}", file=sys.stderr)
+    except RequestException:
+        print("error: request failed: transport error", file=sys.stderr)
         return 1
-    except (OSError, ValueError, TypeError, json.JSONDecodeError) as exc:
+    except OSError as exc:
+        print(f"error: {_safe_os_error(exc)}", file=sys.stderr)
+        return 1
+    except json.JSONDecodeError:
+        print("error: invalid JSON input", file=sys.stderr)
+        return 1
+    except UnicodeError:
+        print("error: invalid UTF-8 input", file=sys.stderr)
+        return 1
+    except (ValueError, TypeError) as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 1
 

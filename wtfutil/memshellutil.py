@@ -190,7 +190,7 @@ def resolve_jre_class_version(value: int | str) -> int:
     try:
         v = int(value)
     except (TypeError, ValueError) as exc:
-        raise ValueError(f"invalid jre / target_jre_version: {value!r}") from exc
+        raise ValueError("invalid jre / target_jre_version") from exc
     if v in JRE_RELEASE_TO_CLASS:
         return JRE_RELEASE_TO_CLASS[v]
     if 1 <= v < 45:
