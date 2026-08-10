@@ -106,7 +106,7 @@ _request(method: str, path: str, **kwargs: Any) -> Any
 2. 调用 `self.req.request(method, url, ...)`。
 3. 捕获 `requests.exceptions.RequestException`。
 4. 抛出 `MemShellPartyError`，并使用 `raise ... from exc` 保留原异常。
-5. 成功获得响应后继续由 `_parse_response()` 处理 HTTP 状态和 JSON body。
+5. 成功获得响应后继续由 `_parse_response()` 处理 HTTP 状态和 JSON body；若响应为 `httputil.EnhancedResponse`，显式调用 `requests.Response.json()`，避免增强响应在解析失败时打印完整响应正文。
 
 网络错误信息格式应包含：
 
@@ -156,7 +156,7 @@ CLI 仍返回退出码 `1`，不改变 stdout 的成功结果格式。
 4. 外部 session 的 adapter、代理和 `trust_env` 不被修改。
 5. GET 网络异常被包装成 `MemShellPartyError`，并保留 `__cause__`。
 6. POST 网络异常被包装，错误文本不包含请求体和凭证。
-7. HTTP 错误、JSON 错误和响应 `error` 字段只公开固定类别与状态码，不保留响应载荷。
+7. HTTP 错误、JSON 错误和响应 `error` 字段只公开固定类别与状态码，不保留响应载荷；真实 `EnhancedResponse` 的非法 JSON 路径不得向 stdout/stderr 打印响应正文。
 8. CLI 对包装后的网络错误输出单行错误并返回 `1`，不打印 traceback。
 
 可选 live 测试继续由 `MEMSHELL_RUN_LIVE=1` 控制，不将外部网络稳定性纳入默认测试结果。

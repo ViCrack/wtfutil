@@ -16,6 +16,7 @@ from unittest import mock
 
 from requests.exceptions import ConnectionError as RequestsConnectionError
 
+from wtfutil.httputil import EnhancedResponse
 from wtfutil.memshell import main as memshell_main
 from wtfutil.memshellutil import (
     DEFAULT_BASE_URL,
@@ -507,6 +508,33 @@ class TestMemShellPartyClient(unittest.TestCase):
         self.assertEqual(ctx.exception.status_code, 502)
         self.assertIsNone(ctx.exception.body)
         self.assertNotIn("example-sensitive", str(ctx.exception))
+        response.json.assert_called_once_with()
+        client.close()
+
+    def test_enhanced_response_invalid_json_has_no_output_side_effect(self):
+        session = mock.Mock()
+        response = EnhancedResponse()
+        response.status_code = 502
+        response.url = "https://example.test/api/config"
+        response._content = b"example-sensitive-response-payload"
+        response.encoding = "utf-8"
+        response._debug = False
+        session.request.return_value = response
+        client = MemShellParty(base_url="https://example.test", session=session)
+        standard_output = io.StringIO()
+        error_output = io.StringIO()
+
+        with (
+            mock.patch("sys.stdout", standard_output),
+            mock.patch("sys.stderr", error_output),
+            self.assertRaises(MemShellPartyError) as ctx,
+        ):
+            client.get_config()
+
+        self.assertEqual(str(ctx.exception), "invalid JSON response (HTTP 502)")
+        self.assertIsNone(ctx.exception.body)
+        self.assertEqual(standard_output.getvalue(), "")
+        self.assertEqual(error_output.getvalue(), "")
         client.close()
 
     def test_http_error_redacts_response_body_and_server_message(self):

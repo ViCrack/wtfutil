@@ -51,8 +51,8 @@ _GENERATE_EPILOG = """
 
 示例：
   memshell generate -o payload.txt
-  memshell generate --password mypass --header-value secret -o out.txt
-  memshell generate --shell-tool godzilla --password p --key k -o out.txt
+  memshell generate --password example-pass --header-value example-token -o out.txt
+  memshell generate --shell-tool godzilla --password example-pass --key example-key -o out.txt
   memshell generate --server tomcat --shell-type filter --jre 9 -o out.txt
   memshell generate --help
 """

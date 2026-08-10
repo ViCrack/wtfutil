@@ -38,7 +38,7 @@ Agent 修改代码、测试、文档、日志和提交内容时必须遵守：
 1. 禁止提交密码、API key、Token、Cookie、Authorization、私钥、证书私钥、真实代理凭证或完整真实环境配置。
 2. 禁止提交 MemShellParty 的真实凭证、`shellClassBase64`、`packResult`、`allPackResults` 或其他可直接使用的生成载荷。
 3. 示例和测试只使用明显的虚构值，例如 `example-pass`、`example-key`；不要使用看起来像真实密钥的长随机字符串。
-4. 异常、调试日志和 CLI 输出不得包含请求体、响应载荷、认证头或代理凭证。
+4. 异常、调试日志和 CLI stderr 不得包含请求体、响应载荷、认证头或代理凭证；CLI 成功 stdout 和输出文件按用户明确请求的命令契约返回结果。
 5. 提交前检查暂存差异；发现疑似敏感信息时停止提交，先移除并提示轮换已经暴露的凭证。
 ```
 
@@ -276,15 +276,18 @@ git commit -m "feat: 为 MemShellParty 增加连接级重试"
         session = mock.Mock()
         session.request.return_value = _fake_resp(
             {
-                "packResult": "abc",
-                "memShellResult": {"shellClassName": "S", "shellToolConfig": {"pass": "p"}},
+                "packResult": "example-generated-payload",
+                "memShellResult": {
+                    "shellClassName": "ExampleShell",
+                    "shellToolConfig": {"pass": "example-pass"},
+                },
             }
         )
         client = MemShellParty(base_url="https://example.test/", session=session)
 
         result = client.generate(shell_tool="Behinder", behinder_pass="example-pass")
 
-        self.assertEqual(result["packResult"], "abc")
+        self.assertEqual(result["packResult"], "example-generated-payload")
         args, kwargs = session.request.call_args
         self.assertEqual(args[0], "POST")
         self.assertTrue(args[1].endswith("/api/memshell/generate"))
