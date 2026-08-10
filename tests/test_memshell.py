@@ -14,6 +14,8 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
+from requests.exceptions import ConnectionError as RequestsConnectionError
+
 from wtfutil.memshell import main as memshell_main
 from wtfutil.memshellutil import (
     DEFAULT_BASE_URL,
@@ -352,34 +354,92 @@ class TestMemShellPartyClient(unittest.TestCase):
 
     def test_get_config(self):
         session = mock.Mock()
-        session.get.return_value = _fake_resp({"Tomcat": {"Behinder": ["Listener"]}})
+        session.request.return_value = _fake_resp({"Tomcat": {"Behinder": ["Listener"]}})
         client = MemShellParty(base_url="https://example.test", session=session)
+
         cfg = client.get_config()
+
         self.assertEqual(cfg["Tomcat"]["Behinder"], ["Listener"])
-        session.get.assert_called_once()
-        self.assertIn("/api/config", session.get.call_args[0][0])
+        args, kwargs = session.request.call_args
+        self.assertEqual(args[0], "GET")
+        self.assertTrue(args[1].endswith("/api/config"))
+        self.assertEqual(kwargs["timeout"], 60)
         client.close()
 
     def test_generate_posts_json(self):
         session = mock.Mock()
-        session.post.return_value = _fake_resp(
+        session.request.return_value = _fake_resp(
             {
-                "packResult": "abc",
-                "memShellResult": {"shellClassName": "S", "shellToolConfig": {"pass": "p"}},
+                "packResult": "example-result",
+                "memShellResult": {
+                    "shellClassName": "ExampleShell",
+                    "shellToolConfig": {"pass": "example-pass"},
+                },
             }
         )
         client = MemShellParty(base_url="https://example.test/", session=session)
-        result = client.generate(shell_tool="Behinder", behinder_pass="p")
-        self.assertEqual(result["packResult"], "abc")
-        args, kwargs = session.post.call_args
-        self.assertTrue(args[0].endswith("/api/memshell/generate"))
+
+        result = client.generate(shell_tool="Behinder", behinder_pass="example-pass")
+
+        self.assertEqual(result["packResult"], "example-result")
+        args, kwargs = session.request.call_args
+        self.assertEqual(args[0], "POST")
+        self.assertTrue(args[1].endswith("/api/memshell/generate"))
         self.assertEqual(kwargs["json"]["shellConfig"]["shellTool"], "Behinder")
-        self.assertEqual(kwargs["json"]["shellToolConfig"]["behinderPass"], "p")
+        self.assertEqual(kwargs["json"]["shellToolConfig"]["behinderPass"], "example-pass")
+        client.close()
+
+    def test_transport_error_is_wrapped_and_preserves_cause(self):
+        session = mock.Mock()
+        cause = RequestsConnectionError(OSError(101, "Network is unreachable"))
+        session.request.side_effect = cause
+        client = MemShellParty(base_url="https://example.test", session=session)
+
+        with self.assertRaises(MemShellPartyError) as ctx:
+            client.get_config()
+
+        self.assertIs(ctx.exception.__cause__, cause)
+        self.assertIsNone(ctx.exception.status_code)
+        self.assertIsNone(ctx.exception.body)
+        self.assertIn("GET https://example.test/api/config", str(ctx.exception))
+        self.assertIn("ConnectionError", str(ctx.exception))
+        self.assertIn("[Errno 101] Network is unreachable", str(ctx.exception))
+        client.close()
+
+    def test_transport_error_redacts_credentials_and_request_body(self):
+        session = mock.Mock()
+        session.request.side_effect = RequestsConnectionError(
+            "proxy https://proxy-user:proxy-pass@proxy.example unavailable"
+        )
+        client = MemShellParty(
+            base_url="https://api-user:api-pass@example.test",
+            session=session,
+        )
+
+        with self.assertRaises(MemShellPartyError) as ctx:
+            client.generate(
+                shell_tool="Behinder",
+                behinder_pass="example-pass",
+                shell_class_base64="example-class-data",
+            )
+
+        message = str(ctx.exception)
+        self.assertIn("POST https://example.test/api/memshell/generate", message)
+        self.assertIn("ConnectionError: transport error", message)
+        for secret in (
+            "api-user",
+            "api-pass",
+            "proxy-user",
+            "proxy-pass",
+            "example-pass",
+            "example-class-data",
+        ):
+            self.assertNotIn(secret, message)
         client.close()
 
     def test_http_error_raises(self):
         session = mock.Mock()
-        session.get.return_value = _fake_resp({"error": "boom"}, status_code=500)
+        session.request.return_value = _fake_resp({"error": "boom"}, status_code=500)
         client = MemShellParty(base_url="https://example.test", session=session)
         with self.assertRaises(MemShellPartyError) as ctx:
             client.get_config()
@@ -388,7 +448,7 @@ class TestMemShellPartyClient(unittest.TestCase):
 
     def test_body_error_field_raises(self):
         session = mock.Mock()
-        session.post.return_value = _fake_resp({"error": "bad combo"}, status_code=200)
+        session.request.return_value = _fake_resp({"error": "bad combo"}, status_code=200)
         client = MemShellParty(base_url="https://example.test", session=session)
         with self.assertRaises(MemShellPartyError):
             client.generate()

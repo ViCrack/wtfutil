@@ -9,8 +9,10 @@ from __future__ import annotations
 
 import math
 from typing import Any
+from urllib.parse import urlsplit
 
 from requests import Session
+from requests.exceptions import RequestException
 from urllib3.util import Retry
 
 from .configutil import ensure_section
@@ -481,6 +483,39 @@ def extract_generate_meta(result: dict, *, output: str | None = None) -> dict:
     return meta
 
 
+def _safe_request_url(url: str) -> str:
+    parsed = urlsplit(url)
+    host = parsed.hostname or ""
+    if ":" in host:
+        host = f"[{host}]"
+    try:
+        port = f":{parsed.port}" if parsed.port is not None else ""
+    except ValueError:
+        port = ""
+    return f"{parsed.scheme}://{host}{port}{parsed.path}"
+
+
+def _safe_transport_error(exc: RequestException) -> str:
+    pending: list[BaseException] = [exc]
+    seen: set[int] = set()
+    while pending:
+        current = pending.pop()
+        if id(current) in seen:
+            continue
+        seen.add(id(current))
+        if isinstance(current, OSError) and current.errno is not None:
+            detail = current.strerror or "operating system network error"
+            return f"[Errno {current.errno}] {detail}"
+        for attribute in ("reason", "original_error", "__cause__", "__context__"):
+            nested = getattr(current, attribute, None)
+            if isinstance(nested, BaseException):
+                pending.append(nested)
+        for argument in getattr(current, "args", ()):
+            if isinstance(argument, BaseException):
+                pending.append(argument)
+    return "transport error"
+
+
 class MemShellParty:
     """
     MemShellParty HTTP 客户端。
@@ -553,6 +588,20 @@ class MemShellParty:
             path = "/" + path
         return self.base_url + path
 
+    def _request(self, method: str, path: str, **kwargs: Any) -> Any:
+        url = self._url(path)
+        try:
+            return self.req.request(method, url, timeout=self.timeout, **kwargs)
+        except RequestException as exc:
+            retry_note = ""
+            if self._owns_session:
+                retry_note = f" with up to {self.connect_retries} connection retries"
+            message = (
+                f"{method.upper()} {_safe_request_url(url)} request failed{retry_note}: "
+                f"{type(exc).__name__}: {_safe_transport_error(exc)}"
+            )
+            raise MemShellPartyError(message) from exc
+
     def _parse_response(self, resp: Any) -> Any:
         """解析 JSON；HTTP 错误或 body.error 时抛 MemShellPartyError。"""
         try:
@@ -581,7 +630,7 @@ class MemShellParty:
 
         返回 ``{ server: { shellTool: [shellType, ...] } }``，用于选择合法组合。
         """
-        resp = self.req.get(self._url("/api/config"), timeout=self.timeout)
+        resp = self._request("GET", "/api/config")
         return self._parse_response(resp)
 
     def get_packers_tree(self) -> list:
@@ -590,7 +639,7 @@ class MemShellParty:
 
         返回 ``[{ name, children }, ...]`` packer 树；叶子或父名可作为 ``packer``。
         """
-        resp = self.req.get(self._url("/api/config/packers/tree"), timeout=self.timeout)
+        resp = self._request("GET", "/api/config/packers/tree")
         return self._parse_response(resp)
 
     def get_command_configs(self) -> dict:
@@ -599,7 +648,7 @@ class MemShellParty:
 
         返回 Command 工具可用的 ``encryptors`` / ``implementationClasses``。
         """
-        resp = self.req.get(self._url("/api/config/command/configs"), timeout=self.timeout)
+        resp = self._request("GET", "/api/config/command/configs")
         return self._parse_response(resp)
 
     def generate(self, body: dict | None = None, **kwargs: Any) -> dict:
@@ -611,11 +660,11 @@ class MemShellParty:
         返回含 ``packResult`` / ``memShellResult`` 的完整响应；不做缓存。
         """
         req_body = build_generate_body(body, **kwargs)
-        resp = self.req.post(
-            self._url("/api/memshell/generate"),
+        resp = self._request(
+            "POST",
+            "/api/memshell/generate",
             json=req_body,
             headers={"Content-Type": "application/json", "Accept": "*/*"},
-            timeout=self.timeout,
         )
         return self._parse_response(resp)
 
