@@ -221,11 +221,11 @@ def canonicalize_shell_type(value: str) -> str:
 
 def _canonicalize_shell_config(shell_config: dict) -> None:
     """就地归一 shellConfig 中的 server / shellTool / shellType。"""
-    if "server" in shell_config and shell_config["server"]:
+    if shell_config.get("server"):
         shell_config["server"] = canonicalize_server(shell_config["server"])
-    if "shellTool" in shell_config and shell_config["shellTool"]:
+    if shell_config.get("shellTool"):
         shell_config["shellTool"] = canonicalize_shell_tool(shell_config["shellTool"])
-    if "shellType" in shell_config and shell_config["shellType"]:
+    if shell_config.get("shellType"):
         shell_config["shellType"] = canonicalize_shell_type(shell_config["shellType"])
 
 
@@ -595,10 +595,11 @@ class MemShellParty:
         if self._owns_session:
             self.req.close()
 
-    def __enter__(self) -> MemShellParty:
+    # Keep the concrete type to avoid a typing_extensions runtime dependency on Python 3.10.
+    def __enter__(self) -> MemShellParty:  # noqa: PYI034
         return self
 
-    def __exit__(self, *args: Any) -> None:
+    def __exit__(self, *args: object) -> None:
         self.close()
 
     def _url(self, path: str) -> str:
@@ -622,25 +623,25 @@ class MemShellParty:
             raise MemShellPartyError(message) from exc
 
     def _parse_response(self, resp: Any) -> Any:
-        """解析 JSON；HTTP 错误或 body.error 时抛 MemShellPartyError。"""
+        """解析 JSON；错误仅公开固定类别和 HTTP 状态码。"""
         try:
             data = resp.json()
         except Exception as exc:
             raise MemShellPartyError(
-                f"invalid JSON response (HTTP {resp.status_code}): {resp.text[:200]}",
+                f"invalid JSON response (HTTP {resp.status_code})",
                 status_code=resp.status_code,
-                body=resp.text,
             ) from exc
 
         if resp.status_code >= 400:
-            err = data.get("error") if isinstance(data, dict) else None
             raise MemShellPartyError(
-                err or f"HTTP {resp.status_code}",
+                f"HTTP {resp.status_code}",
                 status_code=resp.status_code,
-                body=data,
             )
         if isinstance(data, dict) and data.get("error"):
-            raise MemShellPartyError(str(data["error"]), status_code=resp.status_code, body=data)
+            raise MemShellPartyError(
+                f"API response reported an error (HTTP {resp.status_code})",
+                status_code=resp.status_code,
+            )
         return data
 
     def get_config(self) -> dict:

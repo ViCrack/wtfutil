@@ -293,9 +293,9 @@ Failures raise `MemShellPartyError`:
 
 | Attribute | Meaning |
 |-----------|---------|
-| `str(e)` / `args` | Message (prefers server `error` field) |
+| `str(e)` / `args` | Fixed error category and HTTP status; network errors also include a sanitized target, exception type, and errno summary |
 | `e.status_code` | HTTP status (may be `None`) |
-| `e.body` | Raw body (dict or text snippet) |
+| `e.body` | Compatibility attribute; SDK-generated errors leave it as `None` and do not retain the raw response |
 
 ```python
 from wtfutil.memshellutil import MemShellParty, MemShellPartyError
@@ -304,10 +304,10 @@ try:
     with MemShellParty() as client:
         client.generate(shell_type="NotExist")
 except MemShellPartyError as e:
-    print(e, e.status_code, e.body)
+    print(e, e.status_code)
 ```
 
-Typical causes: illegal combo, unreachable host, non-JSON response, or timeout. Transport-level `requests` exceptions are wrapped in `MemShellPartyError`, with the original exception available as `e.__cause__`. Internally owned sessions retry connection-establishment failures twice by default. Read timeouts, HTTP status failures, and response parsing failures are not retried. Externally supplied sessions keep the caller's retry policy.
+Typical causes include an illegal combination, unreachable host, non-JSON response, or timeout. HTTP errors, non-JSON responses, and response `error` fields expose only a fixed error category and status code, never the server text or response payload; JSON parsing failures remain available through `e.__cause__`. Transport-level `requests` exceptions are also wrapped in `MemShellPartyError`, with the original exception available as `e.__cause__`. Internally owned sessions retry connection-establishment failures twice by default. Read timeouts, HTTP status failures, and response parsing failures are not retried. Externally supplied sessions keep the caller's retry policy.
 
 ---
 

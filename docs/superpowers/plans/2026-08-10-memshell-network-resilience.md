@@ -596,7 +596,7 @@ Transport-level `requests` exceptions are wrapped in `MemShellPartyError`, with 
 在 MemShellParty 条目补充：
 
 ```markdown
-- 内部 session 默认仅对连接阶段失败重试 2 次；网络异常统一包装为 `MemShellPartyError`，不得在错误信息中输出请求体、凭证或生成载荷；外部 session 的重试策略不被修改。
+- 内部 session 默认仅对连接阶段失败重试 2 次；网络异常统一包装为 `MemShellPartyError`，不得在错误信息或日志中输出请求体、响应载荷、凭证或生成载荷；外部 session 的重试策略不被修改。
 ```
 
 - [ ] **步骤 6：运行相关测试和格式检查**

@@ -293,9 +293,9 @@ result = client.generate(body=req)
 
 | 属性 | 含义 |
 |------|------|
-| `str(e)` / `args` | 错误信息（优先服务端 `error` 字段） |
+| `str(e)` / `args` | 固定错误类别与 HTTP 状态码；网络错误另含脱敏目标、异常类型和 errno 摘要 |
 | `e.status_code` | HTTP 状态码（可能为 `None`） |
-| `e.body` | 原始响应 body（dict 或文本片段） |
+| `e.body` | 兼容属性；SDK 产生的错误保持为 `None`，不保存原始响应 |
 
 ```python
 from wtfutil.memshellutil import MemShellParty, MemShellPartyError
@@ -304,10 +304,10 @@ try:
     with MemShellParty() as client:
         client.generate(shell_type="NotExist")
 except MemShellPartyError as e:
-    print(e, e.status_code, e.body)
+    print(e, e.status_code)
 ```
 
-常见原因：组合不合法、服务不可达、响应非 JSON、超时。网络层 `requests` 异常统一包装为 `MemShellPartyError`，原异常可通过 `e.__cause__` 检查。内部 session 默认仅重试连接阶段失败 2 次；不重试读取超时、HTTP 状态错误或响应解析错误。外部传入的 session 保留调用方自己的重试策略。
+常见原因：组合不合法、服务不可达、响应非 JSON、超时。HTTP 错误、非 JSON 响应和响应中的 `error` 字段只公开固定错误类别与状态码，不包含服务端原文或响应载荷；JSON 解析异常可通过 `e.__cause__` 检查。网络层 `requests` 异常统一包装为 `MemShellPartyError`，原异常同样可通过 `e.__cause__` 检查。内部 session 默认仅重试连接阶段失败 2 次；不重试读取超时、HTTP 状态错误或响应解析错误。外部传入的 session 保留调用方自己的重试策略。
 
 ---
 
