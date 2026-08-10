@@ -187,7 +187,19 @@ fileutil.py / sqlutil.py / singleinstance.py（无其它 wtfutil 模块依赖）
 
 ---
 
-### 7. Git 提交说明（Agent 撰写 commit message）
+### 7. 敏感信息保护
+
+Agent 修改代码、测试、文档、日志和提交内容时必须遵守：
+
+1. 禁止提交密码、API key、Token、Cookie、Authorization、私钥、证书私钥、真实代理凭证或完整真实环境配置。
+2. 禁止提交 MemShellParty 的真实凭证、`shellClassBase64`、`packResult`、`allPackResults` 或其他可直接使用的生成载荷。
+3. 示例和测试只使用明显的虚构值，例如 `example-pass`、`example-key`；不要使用看起来像真实密钥的长随机字符串。
+4. 异常、调试日志和 CLI 输出不得包含请求体、响应载荷、认证头或代理凭证。
+5. 提交前检查暂存差异；发现疑似敏感信息时停止提交，先移除并提示轮换已经暴露的凭证。
+
+---
+
+### 8. Git 提交说明（Agent 撰写 commit message）
 
 **仅在用户明确要求提交时**才执行 `git commit`；message **一律使用简体中文**。
 
