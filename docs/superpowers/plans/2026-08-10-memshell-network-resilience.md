@@ -308,7 +308,7 @@ from requests.exceptions import ConnectionError as RequestsConnectionError
 ```python
     def test_transport_error_is_wrapped_and_preserves_cause(self):
         session = mock.Mock()
-        cause = RequestsConnectionError(OSError(101, "Network is unreachable"))
+        cause = RequestsConnectionError(OSError(101, "example-sensitive-detail"))
         session.request.side_effect = cause
         client = MemShellParty(base_url="https://example.test", session=session)
 
@@ -320,7 +320,8 @@ from requests.exceptions import ConnectionError as RequestsConnectionError
         self.assertIsNone(ctx.exception.body)
         self.assertIn("GET https://example.test/api/config", str(ctx.exception))
         self.assertIn("ConnectionError", str(ctx.exception))
-        self.assertIn("[Errno 101] Network is unreachable", str(ctx.exception))
+        self.assertIn("[Errno 101]", str(ctx.exception))
+        self.assertNotIn("example-sensitive-detail", str(ctx.exception))
 ```
 
 - [ ] **步骤 3：编写失败测试，验证 URL 凭证和请求凭证不泄露**
@@ -355,6 +356,36 @@ from requests.exceptions import ConnectionError as RequestsConnectionError
             "example-class-data",
         ):
             self.assertNotIn(secret, message)
+
+    def test_transport_error_handles_malformed_base_url(self):
+        session = mock.Mock()
+        cause = RequestsConnectionError("example-sensitive-detail")
+        session.request.side_effect = cause
+        client = MemShellParty(base_url="https://[example-invalid", session=session)
+
+        with self.assertRaises(MemShellPartyError) as ctx:
+            client.get_config()
+
+        self.assertIs(ctx.exception.__cause__, cause)
+        self.assertIn("GET /api/config", str(ctx.exception))
+        self.assertNotIn("example-invalid", str(ctx.exception))
+        self.assertNotIn("example-sensitive-detail", str(ctx.exception))
+
+    def test_transport_error_redacts_base_url_path(self):
+        session = mock.Mock()
+        session.request.side_effect = RequestsConnectionError("example-sensitive-detail")
+        client = MemShellParty(
+            base_url="https://example.test/example-path-secret",
+            session=session,
+        )
+
+        with self.assertRaises(MemShellPartyError) as ctx:
+            client.get_config()
+
+        message = str(ctx.exception)
+        self.assertIn("GET https://example.test/api/config", message)
+        self.assertNotIn("example-path-secret", message)
+        self.assertNotIn("example-sensitive-detail", message)
 ```
 
 - [ ] **步骤 4：运行测试确认失败**
@@ -380,16 +411,33 @@ from requests.exceptions import RequestException
 在 `MemShellParty` 类之前加入：
 
 ```python
-def _safe_request_url(url: str) -> str:
-    parsed = urlsplit(url)
-    host = parsed.hostname or ""
-    if ":" in host:
-        host = f"[{host}]"
+_SAFE_REQUEST_PATHS = frozenset(
+    {
+        "/api/config",
+        "/api/config/packers/tree",
+        "/api/config/command/configs",
+        "/api/memshell/generate",
+    }
+)
+
+
+def _safe_request_url(base_url: str, path: str) -> str:
+    safe_path = path if path in _SAFE_REQUEST_PATHS else "/<redacted>"
     try:
-        port = f":{parsed.port}" if parsed.port is not None else ""
-    except ValueError:
-        port = ""
-    return f"{parsed.scheme}://{host}{port}{parsed.path}"
+        parsed = urlsplit(base_url)
+        scheme = parsed.scheme.casefold()
+        host = parsed.hostname
+        if scheme not in {"http", "https"} or not host:
+            return safe_path
+        if ":" in host:
+            host = f"[{host}]"
+        try:
+            port = f":{parsed.port}" if parsed.port is not None else ""
+        except ValueError:
+            port = ""
+        return f"{scheme}://{host}{port}{safe_path}"
+    except (TypeError, ValueError):
+        return safe_path
 
 
 def _safe_transport_error(exc: RequestException) -> str:
@@ -400,9 +448,10 @@ def _safe_transport_error(exc: RequestException) -> str:
         if id(current) in seen:
             continue
         seen.add(id(current))
-        if isinstance(current, OSError) and current.errno is not None:
-            detail = current.strerror or "operating system network error"
-            return f"[Errno {current.errno}] {detail}"
+        if isinstance(current, OSError):
+            error_number = current.errno
+            if isinstance(error_number, int) and not isinstance(error_number, bool):
+                return f"[Errno {error_number}]"
         for attribute in ("reason", "original_error", "__cause__", "__context__"):
             nested = getattr(current, attribute, None)
             if isinstance(nested, BaseException):
@@ -429,7 +478,8 @@ def _safe_transport_error(exc: RequestException) -> str:
             if self._owns_session:
                 retry_note = f" with up to {self.connect_retries} connection retries"
             message = (
-                f"{method.upper()} {_safe_request_url(url)} request failed{retry_note}: "
+                f"{method.upper()} {_safe_request_url(self.base_url, path)} "
+                f"request failed{retry_note}: "
                 f"{type(exc).__name__}: {_safe_transport_error(exc)}"
             )
             raise MemShellPartyError(message) from exc

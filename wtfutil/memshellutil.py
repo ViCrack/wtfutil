@@ -483,16 +483,33 @@ def extract_generate_meta(result: dict, *, output: str | None = None) -> dict:
     return meta
 
 
-def _safe_request_url(url: str) -> str:
-    parsed = urlsplit(url)
-    host = parsed.hostname or ""
-    if ":" in host:
-        host = f"[{host}]"
+_SAFE_REQUEST_PATHS = frozenset(
+    {
+        "/api/config",
+        "/api/config/packers/tree",
+        "/api/config/command/configs",
+        "/api/memshell/generate",
+    }
+)
+
+
+def _safe_request_url(base_url: str, path: str) -> str:
+    safe_path = path if path in _SAFE_REQUEST_PATHS else "/<redacted>"
     try:
-        port = f":{parsed.port}" if parsed.port is not None else ""
-    except ValueError:
-        port = ""
-    return f"{parsed.scheme}://{host}{port}{parsed.path}"
+        parsed = urlsplit(base_url)
+        scheme = parsed.scheme.casefold()
+        host = parsed.hostname
+        if scheme not in {"http", "https"} or not host:
+            return safe_path
+        if ":" in host:
+            host = f"[{host}]"
+        try:
+            port = f":{parsed.port}" if parsed.port is not None else ""
+        except ValueError:
+            port = ""
+        return f"{scheme}://{host}{port}{safe_path}"
+    except (TypeError, ValueError):
+        return safe_path
 
 
 def _safe_transport_error(exc: RequestException) -> str:
@@ -503,9 +520,10 @@ def _safe_transport_error(exc: RequestException) -> str:
         if id(current) in seen:
             continue
         seen.add(id(current))
-        if isinstance(current, OSError) and current.errno is not None:
-            detail = current.strerror or "operating system network error"
-            return f"[Errno {current.errno}] {detail}"
+        if isinstance(current, OSError):
+            error_number = current.errno
+            if isinstance(error_number, int) and not isinstance(error_number, bool):
+                return f"[Errno {error_number}]"
         for attribute in ("reason", "original_error", "__cause__", "__context__"):
             nested = getattr(current, attribute, None)
             if isinstance(nested, BaseException):
@@ -597,7 +615,8 @@ class MemShellParty:
             if self._owns_session:
                 retry_note = f" with up to {self.connect_retries} connection retries"
             message = (
-                f"{method.upper()} {_safe_request_url(url)} request failed{retry_note}: "
+                f"{method.upper()} {_safe_request_url(self.base_url, path)} "
+                f"request failed{retry_note}: "
                 f"{type(exc).__name__}: {_safe_transport_error(exc)}"
             )
             raise MemShellPartyError(message) from exc

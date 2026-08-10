@@ -391,7 +391,7 @@ class TestMemShellPartyClient(unittest.TestCase):
 
     def test_transport_error_is_wrapped_and_preserves_cause(self):
         session = mock.Mock()
-        cause = RequestsConnectionError(OSError(101, "Network is unreachable"))
+        cause = RequestsConnectionError(OSError(101, "example-sensitive-detail"))
         session.request.side_effect = cause
         client = MemShellParty(base_url="https://example.test", session=session)
 
@@ -403,7 +403,8 @@ class TestMemShellPartyClient(unittest.TestCase):
         self.assertIsNone(ctx.exception.body)
         self.assertIn("GET https://example.test/api/config", str(ctx.exception))
         self.assertIn("ConnectionError", str(ctx.exception))
-        self.assertIn("[Errno 101] Network is unreachable", str(ctx.exception))
+        self.assertIn("[Errno 101]", str(ctx.exception))
+        self.assertNotIn("example-sensitive-detail", str(ctx.exception))
         client.close()
 
     def test_transport_error_redacts_credentials_and_request_body(self):
@@ -435,6 +436,54 @@ class TestMemShellPartyClient(unittest.TestCase):
             "example-class-data",
         ):
             self.assertNotIn(secret, message)
+        client.close()
+
+    def test_transport_error_handles_malformed_base_url(self):
+        session = mock.Mock()
+        cause = RequestsConnectionError("example-sensitive-detail")
+        session.request.side_effect = cause
+        client = MemShellParty(base_url="https://[example-invalid", session=session)
+
+        with self.assertRaises(MemShellPartyError) as ctx:
+            client.get_config()
+
+        self.assertIs(ctx.exception.__cause__, cause)
+        self.assertIn("GET /api/config", str(ctx.exception))
+        self.assertNotIn("example-invalid", str(ctx.exception))
+        self.assertNotIn("example-sensitive-detail", str(ctx.exception))
+        client.close()
+
+    def test_transport_error_redacts_base_url_path(self):
+        session = mock.Mock()
+        session.request.side_effect = RequestsConnectionError("example-sensitive-detail")
+        client = MemShellParty(
+            base_url="https://example.test/example-path-secret",
+            session=session,
+        )
+
+        with self.assertRaises(MemShellPartyError) as ctx:
+            client.get_config()
+
+        message = str(ctx.exception)
+        self.assertIn("GET https://example.test/api/config", message)
+        self.assertNotIn("example-path-secret", message)
+        self.assertNotIn("example-sensitive-detail", message)
+        client.close()
+
+    def test_other_config_endpoints_use_session_request(self):
+        session = mock.Mock()
+        session.request.side_effect = [_fake_resp([]), _fake_resp({})]
+        client = MemShellParty(base_url="https://example.test", session=session)
+
+        self.assertEqual(client.get_packers_tree(), [])
+        self.assertEqual(client.get_command_configs(), {})
+
+        calls = session.request.call_args_list
+        self.assertEqual(calls[0].args[:2], ("GET", "https://example.test/api/config/packers/tree"))
+        self.assertEqual(
+            calls[1].args[:2],
+            ("GET", "https://example.test/api/config/command/configs"),
+        )
         client.close()
 
     def test_http_error_raises(self):

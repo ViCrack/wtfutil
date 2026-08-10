@@ -111,8 +111,8 @@ _request(method: str, path: str, **kwargs: Any) -> Any
 网络错误信息格式应包含：
 
 - HTTP 方法。
-- 请求 URL 或至少 scheme、host、path。
-- 底层异常类型；若异常链中存在操作系统 errno，则包含安全的 errno 和系统错误描述，否则只显示通用 transport error。
+- 安全目标：合法 HTTP(S) base URL 只保留 scheme、host、port，并附加固定 API 路径；畸形 base URL 只显示固定 API 路径。
+- 底层异常类型；若异常链中存在整数操作系统 errno，则只包含 errno 数字，否则只显示通用 transport error。
 - 内部 session 使用的连接重试次数。
 
 不得直接拼接任意底层异常文本，因为代理 URL、认证信息或查询参数可能出现在异常字符串中。
