@@ -289,6 +289,71 @@ class TestExtractGenerateMeta(unittest.TestCase):
 
 
 class TestMemShellPartyClient(unittest.TestCase):
+    @mock.patch("wtfutil.memshellutil.requests_session")
+    def test_internal_session_uses_connect_only_retry(self, session_factory):
+        session_factory.return_value = mock.Mock()
+
+        client = MemShellParty(
+            base_url="https://example.test",
+            connect_retries=2,
+            retry_backoff=0.25,
+        )
+
+        retry = session_factory.call_args.kwargs["max_retries"]
+        self.assertEqual(retry.total, 2)
+        self.assertEqual(retry.connect, 2)
+        self.assertEqual(retry.read, 0)
+        self.assertEqual(retry.status, 0)
+        self.assertEqual(retry.other, 0)
+        self.assertEqual(retry.redirect, 0)
+        self.assertEqual(retry.backoff_factor, 0.25)
+        self.assertEqual(retry.allowed_methods, frozenset({"GET", "POST"}))
+        client.close()
+
+    @mock.patch("wtfutil.memshellutil.requests_session")
+    def test_connect_retries_can_be_disabled(self, session_factory):
+        session_factory.return_value = mock.Mock()
+
+        client = MemShellParty(connect_retries=0)
+
+        retry = session_factory.call_args.kwargs["max_retries"]
+        self.assertEqual(retry.total, 0)
+        self.assertEqual(retry.connect, 0)
+        client.close()
+
+    def test_retry_options_reject_invalid_values(self):
+        for value in (-1, True, 1.5, "2"):
+            with self.subTest(connect_retries=value):
+                with self.assertRaises((TypeError, ValueError)):
+                    MemShellParty(connect_retries=value)
+
+        for value in (-0.1, "invalid", True):
+            with self.subTest(retry_backoff=value):
+                with self.assertRaises((TypeError, ValueError)):
+                    MemShellParty(retry_backoff=value)
+
+    @mock.patch("wtfutil.memshellutil.requests_session")
+    def test_external_session_retry_configuration_is_untouched(self, session_factory):
+        session = mock.Mock()
+        adapter = object()
+        session.adapters = {"https://": adapter}
+        session.proxies = {"https": "http://proxy.example"}
+        session.trust_env = False
+
+        client = MemShellParty(
+            session=session,
+            connect_retries=5,
+            retry_backoff=1.0,
+        )
+
+        session_factory.assert_not_called()
+        self.assertIs(client.req, session)
+        self.assertIs(session.adapters["https://"], adapter)
+        self.assertEqual(session.proxies, {"https": "http://proxy.example"})
+        self.assertFalse(session.trust_env)
+        client.close()
+        session.close.assert_not_called()
+
     def test_get_config(self):
         session = mock.Mock()
         session.get.return_value = _fake_resp({"Tomcat": {"Behinder": ["Listener"]}})

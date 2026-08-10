@@ -10,6 +10,7 @@ from __future__ import annotations
 from typing import Any
 
 from requests import Session
+from urllib3.util import Retry
 
 from .configutil import ensure_section
 from .httputil import requests_session
@@ -491,17 +492,49 @@ class MemShellParty:
         base_url: str | None = None,
         timeout: float = 60,
         session: Session | None = None,
+        connect_retries: int = 2,
+        retry_backoff: float = 0.25,
     ) -> None:
         """
         :param base_url: 服务根地址，默认 https://party.mem.mk
         :param timeout: 请求超时（秒）
         :param session: 可选复用的 requests session；未传则内部创建并在 close 时关闭
+        :param connect_retries: 内部 session 的连接失败重试次数；0 表示禁用
+        :param retry_backoff: 内部 session 的连接重试退避因子
         """
+        if isinstance(connect_retries, bool) or not isinstance(connect_retries, int):
+            raise TypeError("connect_retries must be a non-negative integer")
+        if connect_retries < 0:
+            raise ValueError("connect_retries must be a non-negative integer")
+        if isinstance(retry_backoff, bool):
+            raise TypeError("retry_backoff must be a non-negative number")
+        try:
+            retry_backoff_value = float(retry_backoff)
+        except (TypeError, ValueError) as exc:
+            raise TypeError("retry_backoff must be a non-negative number") from exc
+        if retry_backoff_value < 0:
+            raise ValueError("retry_backoff must be a non-negative number")
+
         _load_memshell_config()
         self.base_url = (base_url or memshell_config.get("BASE_URL") or DEFAULT_BASE_URL).rstrip("/")
         self.timeout = timeout
+        self.connect_retries = connect_retries
+        self.retry_backoff = retry_backoff_value
         self._owns_session = session is None
-        self.req = session or requests_session(timeout=timeout)
+        if session is None:
+            retry = Retry(
+                total=connect_retries,
+                connect=connect_retries,
+                read=0,
+                status=0,
+                other=0,
+                redirect=0,
+                backoff_factor=retry_backoff_value,
+                allowed_methods=frozenset({"GET", "POST"}),
+            )
+            self.req = requests_session(timeout=timeout, max_retries=retry)
+        else:
+            self.req = session
 
     def close(self) -> None:
         """关闭内部创建的 session（外部传入的 session 不关闭）。"""
