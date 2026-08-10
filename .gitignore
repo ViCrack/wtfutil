@@ -55,3 +55,6 @@ wtfconfig.ini
 
 # git filter-repo / rewrite 临时目录（勿提交）
 .git-rewrite/
+
+# Local linked worktrees
+.worktrees/
