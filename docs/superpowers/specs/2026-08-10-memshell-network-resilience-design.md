@@ -54,14 +54,14 @@ MemShellParty(
 参数语义：
 
 - `connect_retries`：连接阶段失败后的最大重试次数；`0` 表示关闭自动重试。
-- `retry_backoff`：urllib3 Retry 使用的退避因子；必须大于等于 `0`。
+- `retry_backoff`：urllib3 Retry 使用的退避因子；必须是有限的非负数。
 - 两个参数只应用于客户端内部创建的 session。
 - 传入外部 `session=` 时不挂载或替换调用方的 adapter；调用方继续完全控制重试策略。
 
 参数校验：
 
 - `connect_retries` 必须是大于等于 `0` 的整数，布尔值不作为整数接受。
-- `retry_backoff` 必须可转换为大于等于 `0` 的浮点数。
+- `retry_backoff` 必须可转换为有限的非负浮点数；`NaN` 和无穷值均拒绝。
 - 非法参数抛出 `ValueError` 或 `TypeError`，沿用项目现有参数错误风格。
 
 ## 重试策略
@@ -106,22 +106,24 @@ _request(method: str, path: str, **kwargs: Any) -> Any
 2. 调用 `self.req.request(method, url, ...)`。
 3. 捕获 `requests.exceptions.RequestException`。
 4. 抛出 `MemShellPartyError`，并使用 `raise ... from exc` 保留原异常。
-5. 成功获得响应后继续由 `_parse_response()` 处理 HTTP 状态和 JSON body。
+5. 成功获得响应后继续由 `_parse_response()` 处理 HTTP 状态和 JSON body；若响应为 `httputil.EnhancedResponse`，显式调用 `requests.Response.json()`，避免增强响应在解析失败时打印完整响应正文。
 
 网络错误信息格式应包含：
 
 - HTTP 方法。
-- 请求 URL 或至少 scheme、host、path。
-- 底层异常类型和原始错误摘要。
+- 安全目标：合法 HTTP(S) base URL 只保留 scheme、host、port，并附加固定 API 路径；畸形 base URL 只显示固定 API 路径。
+- 底层异常类型；若异常链中存在整数操作系统 errno，则只包含 errno 数字，否则只显示通用 transport error。
 - 内部 session 使用的连接重试次数。
+
+不得直接拼接任意底层异常文本，因为代理 URL、认证信息或查询参数可能出现在异常字符串中。
 
 错误信息不得包含：
 
-- JSON 请求体。
+- JSON 请求体、原始响应 body 或服务端 `error` 字段原文。
 - `password`、`key`、`behinderPass`、`godzillaPass`、`godzillaKey`、`antSwordPass`。
 - `shellClassBase64` 或生成结果。
 
-现有 `MemShellPartyError.status_code` 和 `body` 保持兼容。网络错误使用 `status_code=None`、`body=None`。原始 `requests` 异常通过 `exception.__cause__` 获取，不新增重复的公开 cause 属性。
+现有 `MemShellPartyError.status_code` 和 `body` 属性保持兼容。SDK 产生的网络、HTTP 和响应解析错误均使用 `body=None`，避免异常对象或日志保留响应载荷；HTTP 和解析错误仍保留 `status_code`。原始 `requests` 或 JSON 解析异常通过 `exception.__cause__` 获取，不新增重复的公开 cause 属性。
 
 ## 外部 Session 行为
 
@@ -154,7 +156,7 @@ CLI 仍返回退出码 `1`，不改变 stdout 的成功结果格式。
 4. 外部 session 的 adapter、代理和 `trust_env` 不被修改。
 5. GET 网络异常被包装成 `MemShellPartyError`，并保留 `__cause__`。
 6. POST 网络异常被包装，错误文本不包含请求体和凭证。
-7. HTTP 错误和 JSON 错误继续沿用现有 `_parse_response()` 行为。
+7. HTTP 错误、JSON 错误和响应 `error` 字段只公开固定类别与状态码，不保留响应载荷；真实 `EnhancedResponse` 的非法 JSON 路径不得向 stdout/stderr 打印响应正文。
 8. CLI 对包装后的网络错误输出单行错误并返回 `1`，不打印 traceback。
 
 可选 live 测试继续由 `MEMSHELL_RUN_LIVE=1` 控制，不将外部网络稳定性纳入默认测试结果。
@@ -188,14 +190,14 @@ CLI 仍返回退出码 `1`，不改变 stdout 的成功结果格式。
 
 - 现有构造调用不需要修改。
 - 现有返回结构不变。
-- 现有 `MemShellPartyError` 属性不变。
+- 现有 `MemShellPartyError` 属性不变；SDK 产生的错误不再将原始响应写入 `body`。
 - 外部 session 所有权语义不变。
 
 主要风险：
 
 - 瞬时故障时请求耗时增加。默认两次连接重试和较小退避将该影响限制在可控范围内。
 - urllib3 不同版本对底层错误分类可能有差异。测试只验证 Retry 配置和异常边界，不依赖真实网络制造特定 errno。
-- 自动重试无法修复持续性路由故障，最终错误仍需完整暴露。
+- 自动重试无法修复持续性路由故障，最终错误仍以不含敏感内容的固定摘要暴露。
 
 ## 验收标准
 

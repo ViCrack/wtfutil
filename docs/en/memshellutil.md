@@ -20,8 +20,8 @@ with MemShellParty() as client:
         shell_tool="behinder",   # case-insensitive
         shell_type="listener",
         jre=9,                   # Java/JRE release; ≥9 auto byPassJavaModule=True
-        password="pass",         # convenience password → behinderPass
-        header_value="secret",   # header gate (default header_name=User-Agent)
+        password="example-pass",         # convenience password → behinderPass
+        header_value="example-token",    # header gate (default header_name=User-Agent)
     )
     payload = result["packResult"]           # packed deliverable string
     info = result["memShellResult"]          # class names, sizes, connect params
@@ -74,7 +74,9 @@ Constructor args:
 |-----|---------|--------|
 | `base_url` | see above | Service root (trailing slash optional) |
 | `timeout` | `60` | Per-request timeout in seconds; raise if generate is slow |
-| `session` | created internally | Enhanced session from `wtfutil.httputil` |
+| `session` | created internally | Enhanced session from `wtfutil.httputil`; caller controls retries when supplied |
+| `connect_retries` | `2` | Retry connection-establishment failures only; `0` disables retries |
+| `retry_backoff` | `0.25` | Connection retry backoff factor; must be finite and non-negative |
 
 ---
 
@@ -136,27 +138,35 @@ For `shell_tool="Command"` when unset: `encryptor="RAW"`, `implementation_class=
 
 | Form | Behavior |
 |------|----------|
-| `password="x"` | Mapped by `shell_tool` to Behinder / Godzilla / AntSword `*Pass` |
-| `key="k"` | Written as Godzilla `godzillaKey` (usually irrelevant for other tools) |
+| `password="example-pass"` | Mapped by `shell_tool` to Behinder / Godzilla / AntSword `*Pass` |
+| `key="example-key"` | Written as Godzilla `godzillaKey` (usually irrelevant for other tools) |
 | `behinder_pass` / `godzilla_pass` / `godzilla_key` / `ant_sword_pass` | Advanced: specific fields win over `password` / `key` (prefer convenience fields day-to-day) |
 | Empty password fields | Server generates random values; returned in `memShellResult.shellToolConfig` |
 | `header_name` + `header_value` | Request must match this header before shell logic runs; set `header_value` yourself in practice |
 
 ```python
 # convenience
-client.generate(shell_tool="Behinder", password="p1", header_value="tok")
+client.generate(
+    shell_tool="Behinder",
+    password="example-pass",
+    header_value="example-token",
+)
 
 # Godzilla
 client.generate(
     shell_tool="Godzilla",
     shell_type="Filter",
-    password="pass",
-    key="key",
-    header_value="tok",
+    password="example-pass",
+    key="example-key",
+    header_value="example-token",
 )
 
 # specific field overrides convenience password
-client.generate(shell_tool="Behinder", password="ignored", behinder_pass="real")
+client.generate(
+    shell_tool="Behinder",
+    password="example-unused-pass",
+    behinder_pass="example-override-pass",
+)
 ```
 
 ### Parameter reference
@@ -211,7 +221,7 @@ payload = result["packResult"]
 mem = result["memShellResult"]
 print(mem["shellClassName"], mem["injectorClassName"])
 print(mem["shellSize"], mem["injectorSize"])
-print(mem["shellToolConfig"])  # includes real passwords if they were left empty
+print(mem["shellToolConfig"])  # includes server-generated connection credentials when left empty
 ```
 
 For compact metadata without a large `packResult`:
@@ -237,9 +247,9 @@ with MemShellParty() as client:
         shell_type="Filter",
         jre=8,
         url_pattern="/*",
-        password="admin",
+        password="example-pass",
         header_name="User-Agent",
-        header_value="Mozilla/5.0-mem",
+        header_value="example-token",
         packer="DefaultBase64",
     )
     open("payload.txt", "w", encoding="utf-8").write(r["packResult"])
@@ -257,7 +267,7 @@ with MemShellParty() as client:
         command_param_name="cmd",
         encryptor="RAW",
         implementation_class="RuntimeExec",
-        header_value="x",
+        header_value="example-token",
     )
 ```
 
@@ -266,7 +276,10 @@ with MemShellParty() as client:
 ```python
 body = {
     "shellConfig": {"server": "Tomcat", "shellTool": "Behinder", "shellType": "Listener"},
-    "shellToolConfig": {"behinderPass": "p", "headerValue": "h"},
+    "shellToolConfig": {
+        "behinderPass": "example-pass",
+        "headerValue": "example-token",
+    },
     "injectorConfig": {"urlPattern": "/*"},
     "packer": "DefaultBase64",
 }
@@ -279,7 +292,12 @@ Build the request without sending:
 ```python
 from wtfutil.memshellutil import build_generate_body
 
-req = build_generate_body(shell_tool="Godzilla", password="p", key="k", header_value="h")
+req = build_generate_body(
+    shell_tool="Godzilla",
+    password="example-pass",
+    key="example-key",
+    header_value="example-token",
+)
 result = client.generate(body=req)
 ```
 
@@ -291,9 +309,9 @@ Failures raise `MemShellPartyError`:
 
 | Attribute | Meaning |
 |-----------|---------|
-| `str(e)` / `args` | Message (prefers server `error` field) |
+| `str(e)` / `args` | Fixed error category and HTTP status; network errors also include a sanitized target, exception type, and errno summary |
 | `e.status_code` | HTTP status (may be `None`) |
-| `e.body` | Raw body (dict or text snippet) |
+| `e.body` | Compatibility attribute; SDK-generated errors leave it as `None` and do not retain the raw response |
 
 ```python
 from wtfutil.memshellutil import MemShellParty, MemShellPartyError
@@ -302,10 +320,10 @@ try:
     with MemShellParty() as client:
         client.generate(shell_type="NotExist")
 except MemShellPartyError as e:
-    print(e, e.status_code, e.body)
+    print(e, e.status_code)
 ```
 
-Typical causes: illegal combo, unreachable host, non-JSON response, timeout. Transport errors may also surface as raw `requests` exceptions—wrap those if you need a single catch-all.
+Typical causes include an illegal combination, unreachable host, non-JSON response, or timeout. HTTP errors, non-JSON responses, and response `error` fields expose only a fixed error category and status code, never the server text or response payload; JSON parsing failures remain available through `e.__cause__`. Transport-level `requests` exceptions are also wrapped in `MemShellPartyError`, with the original exception available as `e.__cause__`. Internally owned sessions retry connection-establishment failures twice by default. Read timeouts, HTTP status failures, and response parsing failures are not retried. Externally supplied sessions keep the caller's retry policy.
 
 ---
 

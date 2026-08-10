@@ -7,12 +7,16 @@ MemShellParty HTTP API 客户端：生成内存马 / 查询配置。
 
 from __future__ import annotations
 
+import math
 from typing import Any
+from urllib.parse import urlsplit
 
-from requests import Session
+from requests import Response, Session
+from requests.exceptions import RequestException
+from urllib3.util import Retry
 
 from .configutil import ensure_section
-from .httputil import requests_session
+from .httputil import EnhancedResponse, requests_session
 
 DEFAULT_BASE_URL = "https://party.mem.mk"
 
@@ -186,7 +190,7 @@ def resolve_jre_class_version(value: int | str) -> int:
     try:
         v = int(value)
     except (TypeError, ValueError) as exc:
-        raise ValueError(f"invalid jre / target_jre_version: {value!r}") from exc
+        raise ValueError("invalid jre / target_jre_version") from exc
     if v in JRE_RELEASE_TO_CLASS:
         return JRE_RELEASE_TO_CLASS[v]
     if 1 <= v < 45:
@@ -217,11 +221,11 @@ def canonicalize_shell_type(value: str) -> str:
 
 def _canonicalize_shell_config(shell_config: dict) -> None:
     """就地归一 shellConfig 中的 server / shellTool / shellType。"""
-    if "server" in shell_config and shell_config["server"]:
+    if shell_config.get("server"):
         shell_config["server"] = canonicalize_server(shell_config["server"])
-    if "shellTool" in shell_config and shell_config["shellTool"]:
+    if shell_config.get("shellTool"):
         shell_config["shellTool"] = canonicalize_shell_tool(shell_config["shellTool"])
-    if "shellType" in shell_config and shell_config["shellType"]:
+    if shell_config.get("shellType"):
         shell_config["shellType"] = canonicalize_shell_type(shell_config["shellType"])
 
 
@@ -479,6 +483,57 @@ def extract_generate_meta(result: dict, *, output: str | None = None) -> dict:
     return meta
 
 
+_SAFE_REQUEST_PATHS = frozenset(
+    {
+        "/api/config",
+        "/api/config/packers/tree",
+        "/api/config/command/configs",
+        "/api/memshell/generate",
+    }
+)
+
+
+def _safe_request_url(base_url: str, path: str) -> str:
+    safe_path = path if path in _SAFE_REQUEST_PATHS else "/<redacted>"
+    try:
+        parsed = urlsplit(base_url)
+        scheme = parsed.scheme.casefold()
+        host = parsed.hostname
+        if scheme not in {"http", "https"} or not host:
+            return safe_path
+        if ":" in host:
+            host = f"[{host}]"
+        try:
+            port = f":{parsed.port}" if parsed.port is not None else ""
+        except ValueError:
+            port = ""
+        return f"{scheme}://{host}{port}{safe_path}"
+    except (TypeError, ValueError):
+        return safe_path
+
+
+def _safe_transport_error(exc: RequestException) -> str:
+    pending: list[BaseException] = [exc]
+    seen: set[int] = set()
+    while pending:
+        current = pending.pop()
+        if id(current) in seen:
+            continue
+        seen.add(id(current))
+        if isinstance(current, OSError):
+            error_number = current.errno
+            if isinstance(error_number, int) and not isinstance(error_number, bool):
+                return f"[Errno {error_number}]"
+        for attribute in ("reason", "original_error", "__cause__", "__context__"):
+            nested = getattr(current, attribute, None)
+            if isinstance(nested, BaseException):
+                pending.append(nested)
+        for argument in getattr(current, "args", ()):
+            if isinstance(argument, BaseException):
+                pending.append(argument)
+    return "transport error"
+
+
 class MemShellParty:
     """
     MemShellParty HTTP 客户端。
@@ -491,27 +546,60 @@ class MemShellParty:
         base_url: str | None = None,
         timeout: float = 60,
         session: Session | None = None,
+        connect_retries: int = 2,
+        retry_backoff: float = 0.25,
     ) -> None:
         """
         :param base_url: 服务根地址，默认 https://party.mem.mk
         :param timeout: 请求超时（秒）
         :param session: 可选复用的 requests session；未传则内部创建并在 close 时关闭
+        :param connect_retries: 内部 session 的连接失败重试次数；0 表示禁用
+        :param retry_backoff: 内部 session 的有限非负连接重试退避因子
         """
+        if isinstance(connect_retries, bool) or not isinstance(connect_retries, int):
+            raise TypeError("connect_retries must be a non-negative integer")
+        if connect_retries < 0:
+            raise ValueError("connect_retries must be a non-negative integer")
+        if isinstance(retry_backoff, bool):
+            raise TypeError("retry_backoff must be a finite non-negative number")
+        try:
+            retry_backoff_value = float(retry_backoff)
+        except (TypeError, ValueError) as exc:
+            raise TypeError("retry_backoff must be a finite non-negative number") from exc
+        if retry_backoff_value < 0 or not math.isfinite(retry_backoff_value):
+            raise ValueError("retry_backoff must be a finite non-negative number")
+
         _load_memshell_config()
         self.base_url = (base_url or memshell_config.get("BASE_URL") or DEFAULT_BASE_URL).rstrip("/")
         self.timeout = timeout
+        self.connect_retries = connect_retries
+        self.retry_backoff = retry_backoff_value
         self._owns_session = session is None
-        self.req = session or requests_session(timeout=timeout)
+        if session is None:
+            retry = Retry(
+                total=connect_retries,
+                connect=connect_retries,
+                read=0,
+                status=0,
+                other=0,
+                redirect=0,
+                backoff_factor=retry_backoff_value,
+                allowed_methods=frozenset({"GET", "POST"}),
+            )
+            self.req = requests_session(timeout=timeout, max_retries=retry)
+        else:
+            self.req = session
 
     def close(self) -> None:
         """关闭内部创建的 session（外部传入的 session 不关闭）。"""
         if self._owns_session:
             self.req.close()
 
-    def __enter__(self) -> MemShellParty:
+    # Keep the concrete type to avoid a typing_extensions runtime dependency on Python 3.10.
+    def __enter__(self) -> MemShellParty:  # noqa: PYI034
         return self
 
-    def __exit__(self, *args: Any) -> None:
+    def __exit__(self, *args: object) -> None:
         self.close()
 
     def _url(self, path: str) -> str:
@@ -519,26 +607,44 @@ class MemShellParty:
             path = "/" + path
         return self.base_url + path
 
-    def _parse_response(self, resp: Any) -> Any:
-        """解析 JSON；HTTP 错误或 body.error 时抛 MemShellPartyError。"""
+    def _request(self, method: str, path: str, **kwargs: Any) -> Any:
+        url = self._url(path)
         try:
-            data = resp.json()
+            return self.req.request(method, url, timeout=self.timeout, **kwargs)
+        except RequestException as exc:
+            retry_note = ""
+            if self._owns_session:
+                retry_note = f" with up to {self.connect_retries} connection retries"
+            message = (
+                f"{method.upper()} {_safe_request_url(self.base_url, path)} "
+                f"request failed{retry_note}: "
+                f"{type(exc).__name__}: {_safe_transport_error(exc)}"
+            )
+            raise MemShellPartyError(message) from exc
+
+    def _parse_response(self, resp: Any) -> Any:
+        """解析 JSON；错误仅公开固定类别和 HTTP 状态码。"""
+        try:
+            if isinstance(resp, EnhancedResponse):
+                data = Response.json(resp)
+            else:
+                data = resp.json()
         except Exception as exc:
             raise MemShellPartyError(
-                f"invalid JSON response (HTTP {resp.status_code}): {resp.text[:200]}",
+                f"invalid JSON response (HTTP {resp.status_code})",
                 status_code=resp.status_code,
-                body=resp.text,
             ) from exc
 
         if resp.status_code >= 400:
-            err = data.get("error") if isinstance(data, dict) else None
             raise MemShellPartyError(
-                err or f"HTTP {resp.status_code}",
+                f"HTTP {resp.status_code}",
                 status_code=resp.status_code,
-                body=data,
             )
         if isinstance(data, dict) and data.get("error"):
-            raise MemShellPartyError(str(data["error"]), status_code=resp.status_code, body=data)
+            raise MemShellPartyError(
+                f"API response reported an error (HTTP {resp.status_code})",
+                status_code=resp.status_code,
+            )
         return data
 
     def get_config(self) -> dict:
@@ -547,7 +653,7 @@ class MemShellParty:
 
         返回 ``{ server: { shellTool: [shellType, ...] } }``，用于选择合法组合。
         """
-        resp = self.req.get(self._url("/api/config"), timeout=self.timeout)
+        resp = self._request("GET", "/api/config")
         return self._parse_response(resp)
 
     def get_packers_tree(self) -> list:
@@ -556,7 +662,7 @@ class MemShellParty:
 
         返回 ``[{ name, children }, ...]`` packer 树；叶子或父名可作为 ``packer``。
         """
-        resp = self.req.get(self._url("/api/config/packers/tree"), timeout=self.timeout)
+        resp = self._request("GET", "/api/config/packers/tree")
         return self._parse_response(resp)
 
     def get_command_configs(self) -> dict:
@@ -565,7 +671,7 @@ class MemShellParty:
 
         返回 Command 工具可用的 ``encryptors`` / ``implementationClasses``。
         """
-        resp = self.req.get(self._url("/api/config/command/configs"), timeout=self.timeout)
+        resp = self._request("GET", "/api/config/command/configs")
         return self._parse_response(resp)
 
     def generate(self, body: dict | None = None, **kwargs: Any) -> dict:
@@ -577,11 +683,11 @@ class MemShellParty:
         返回含 ``packResult`` / ``memShellResult`` 的完整响应；不做缓存。
         """
         req_body = build_generate_body(body, **kwargs)
-        resp = self.req.post(
-            self._url("/api/memshell/generate"),
+        resp = self._request(
+            "POST",
+            "/api/memshell/generate",
             json=req_body,
             headers={"Content-Type": "application/json", "Accept": "*/*"},
-            timeout=self.timeout,
         )
         return self._parse_response(resp)
 

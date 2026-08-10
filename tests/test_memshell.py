@@ -14,6 +14,9 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
+from requests.exceptions import ConnectionError as RequestsConnectionError
+
+from wtfutil.httputil import EnhancedResponse
 from wtfutil.memshell import main as memshell_main
 from wtfutil.memshellutil import (
     DEFAULT_BASE_URL,
@@ -41,42 +44,42 @@ def _fake_resp(data, status_code: int = 200):
 
 class TestResolveShellCredentials(unittest.TestCase):
     def test_pass_maps_behinder(self):
-        c = resolve_shell_credentials("Behinder", password="p1")
-        self.assertEqual(c["behinder_pass"], "p1")
+        c = resolve_shell_credentials("Behinder", password="example-pass")
+        self.assertEqual(c["behinder_pass"], "example-pass")
         self.assertEqual(c["godzilla_pass"], "")
         self.assertEqual(c["ant_sword_pass"], "")
 
     def test_pass_maps_case_insensitive(self):
-        c = resolve_shell_credentials("behinder", password="p1")
-        self.assertEqual(c["behinder_pass"], "p1")
-        c2 = resolve_shell_credentials("GODZILLA", password="gp", key="gk")
-        self.assertEqual(c2["godzilla_pass"], "gp")
-        self.assertEqual(c2["godzilla_key"], "gk")
+        c = resolve_shell_credentials("behinder", password="example-pass")
+        self.assertEqual(c["behinder_pass"], "example-pass")
+        c2 = resolve_shell_credentials("GODZILLA", password="example-pass", key="example-key")
+        self.assertEqual(c2["godzilla_pass"], "example-pass")
+        self.assertEqual(c2["godzilla_key"], "example-key")
 
     def test_pass_maps_godzilla_with_key(self):
-        c = resolve_shell_credentials("Godzilla", password="gp", key="gk")
-        self.assertEqual(c["godzilla_pass"], "gp")
-        self.assertEqual(c["godzilla_key"], "gk")
+        c = resolve_shell_credentials("Godzilla", password="example-pass", key="example-key")
+        self.assertEqual(c["godzilla_pass"], "example-pass")
+        self.assertEqual(c["godzilla_key"], "example-key")
         self.assertEqual(c["behinder_pass"], "")
 
     def test_pass_maps_antsword(self):
-        c = resolve_shell_credentials("AntSword", password="ap")
-        self.assertEqual(c["ant_sword_pass"], "ap")
+        c = resolve_shell_credentials("AntSword", password="example-pass")
+        self.assertEqual(c["ant_sword_pass"], "example-pass")
 
     def test_specific_overrides_generic(self):
         c = resolve_shell_credentials(
             "Behinder",
-            password="generic",
-            behinder_pass="specific",
+            password="example-generic-pass",
+            behinder_pass="example-specific-pass",
         )
-        self.assertEqual(c["behinder_pass"], "specific")
+        self.assertEqual(c["behinder_pass"], "example-specific-pass")
 
     def test_build_body_password_convenience(self):
-        body = build_generate_body(shell_tool="Behinder", password="via")
-        self.assertEqual(body["shellToolConfig"]["behinderPass"], "via")
-        body2 = build_generate_body(shell_tool="Godzilla", password="p", key="k")
-        self.assertEqual(body2["shellToolConfig"]["godzillaPass"], "p")
-        self.assertEqual(body2["shellToolConfig"]["godzillaKey"], "k")
+        body = build_generate_body(shell_tool="Behinder", password="example-pass")
+        self.assertEqual(body["shellToolConfig"]["behinderPass"], "example-pass")
+        body2 = build_generate_body(shell_tool="Godzilla", password="example-pass", key="example-key")
+        self.assertEqual(body2["shellToolConfig"]["godzillaPass"], "example-pass")
+        self.assertEqual(body2["shellToolConfig"]["godzillaKey"], "example-key")
 
 
 class TestBuildGenerateBody(unittest.TestCase):
@@ -126,14 +129,14 @@ class TestBuildGenerateBody(unittest.TestCase):
             server="tomcat",
             shell_tool="GODZILLA",
             shell_type="filter",
-            password="p",
-            key="k",
+            password="example-pass",
+            key="example-key",
         )
         self.assertEqual(body["shellConfig"]["server"], "Tomcat")
         self.assertEqual(body["shellConfig"]["shellTool"], "Godzilla")
         self.assertEqual(body["shellConfig"]["shellType"], "Filter")
-        self.assertEqual(body["shellToolConfig"]["godzillaPass"], "p")
-        self.assertEqual(body["shellToolConfig"]["godzillaKey"], "k")
+        self.assertEqual(body["shellToolConfig"]["godzillaPass"], "example-pass")
+        self.assertEqual(body["shellToolConfig"]["godzillaKey"], "example-key")
 
     def test_case_insensitive_via_body(self):
         body = build_generate_body(
@@ -149,18 +152,21 @@ class TestBuildGenerateBody(unittest.TestCase):
 
     def test_password_remaps_when_body_changes_tool(self):
         body = build_generate_body(
-            password="p",
-            key="k",
+            password="example-pass",
+            key="example-key",
             body={"shellConfig": {"shellTool": "godzilla"}},
         )
         self.assertEqual(body["shellConfig"]["shellTool"], "Godzilla")
-        self.assertEqual(body["shellToolConfig"]["godzillaPass"], "p")
-        self.assertEqual(body["shellToolConfig"]["godzillaKey"], "k")
+        self.assertEqual(body["shellToolConfig"]["godzillaPass"], "example-pass")
+        self.assertEqual(body["shellToolConfig"]["godzillaKey"], "example-key")
         self.assertEqual(body["shellToolConfig"]["behinderPass"], "")
 
-    def test_invalid_jre_raises(self):
-        with self.assertRaises(ValueError):
-            build_generate_body(jre="abc")
+    def test_invalid_jre_raises_without_echoing_input(self):
+        with self.assertRaises(ValueError) as ctx:
+            build_generate_body(jre="example-sensitive-jre")
+
+        self.assertEqual(str(ctx.exception), "invalid jre / target_jre_version")
+        self.assertNotIn("example-sensitive", str(ctx.exception))
 
     def test_command_defaults(self):
         body = build_generate_body(shell_tool="Command")
@@ -214,12 +220,12 @@ class TestBuildGenerateBody(unittest.TestCase):
 
     def test_camelcase_official_fields(self):
         body = build_generate_body(
-            behinder_pass="p",
-            header_value="v",
+            behinder_pass="example-pass",
+            header_value="example-token",
             target_jre_version="61",
         )
-        self.assertEqual(body["shellToolConfig"]["behinderPass"], "p")
-        self.assertEqual(body["shellToolConfig"]["headerValue"], "v")
+        self.assertEqual(body["shellToolConfig"]["behinderPass"], "example-pass")
+        self.assertEqual(body["shellToolConfig"]["headerValue"], "example-token")
         self.assertEqual(body["shellConfig"]["targetJreVersion"], 61)
         self.assertTrue(body["shellConfig"]["byPassJavaModule"])
 
@@ -227,14 +233,14 @@ class TestBuildGenerateBody(unittest.TestCase):
 class TestExtractGenerateMeta(unittest.TestCase):
     def test_strips_bytes_and_exposes_output(self):
         result = {
-            "packResult": "PAYLOAD" * 100,
+            "packResult": "example-payload-" * 100,
             "memShellResult": {
                 "shellClassName": "a.b.Shell",
                 "injectorClassName": "a.b.Inj",
                 "shellSize": 10,
                 "injectorSize": 20,
                 "shellConfig": {"shellTool": "Behinder"},
-                "shellToolConfig": {"pass": "x", "headerName": "User-Agent"},
+                "shellToolConfig": {"pass": "example-pass", "headerName": "User-Agent"},
                 "injectorConfig": {
                     "urlPattern": "/*",
                     "shellClassBytes": "AAAA",
@@ -289,48 +295,284 @@ class TestExtractGenerateMeta(unittest.TestCase):
 
 
 class TestMemShellPartyClient(unittest.TestCase):
+    @mock.patch("wtfutil.memshellutil.requests_session")
+    def test_internal_session_uses_connect_only_retry(self, session_factory):
+        session_factory.return_value = mock.Mock()
+
+        client = MemShellParty(base_url="https://example.test")
+
+        retry = session_factory.call_args.kwargs["max_retries"]
+        self.assertEqual(retry.total, 2)
+        self.assertEqual(retry.connect, 2)
+        self.assertEqual(retry.read, 0)
+        self.assertEqual(retry.status, 0)
+        self.assertEqual(retry.other, 0)
+        self.assertEqual(retry.redirect, 0)
+        self.assertEqual(retry.backoff_factor, 0.25)
+        self.assertEqual(retry.allowed_methods, frozenset({"GET", "POST"}))
+        client.close()
+
+    @mock.patch("wtfutil.memshellutil.requests_session")
+    def test_connect_retries_can_be_disabled(self, session_factory):
+        session_factory.return_value = mock.Mock()
+
+        client = MemShellParty(connect_retries=0)
+
+        retry = session_factory.call_args.kwargs["max_retries"]
+        self.assertEqual(retry.total, 0)
+        self.assertEqual(retry.connect, 0)
+        client.close()
+
+    def test_retry_options_reject_invalid_values(self):
+        for value in (-1, True, 1.5, "2"):
+            with self.subTest(connect_retries=value), self.assertRaises(
+                (TypeError, ValueError)
+            ):
+                MemShellParty(connect_retries=value)
+
+        for value in (-0.1, "invalid", True, float("nan"), float("inf"), float("-inf")):
+            with self.subTest(retry_backoff=value), self.assertRaises(
+                (TypeError, ValueError)
+            ):
+                MemShellParty(retry_backoff=value)
+
+    @mock.patch("wtfutil.memshellutil.requests_session")
+    def test_external_session_retry_configuration_is_untouched(self, session_factory):
+        session = mock.Mock()
+        adapter = object()
+        session.adapters = {"https://": adapter}
+        session.proxies = {"https": "http://proxy.example"}
+        session.trust_env = False
+
+        client = MemShellParty(
+            session=session,
+            connect_retries=5,
+            retry_backoff=1.0,
+        )
+
+        session_factory.assert_not_called()
+        self.assertIs(client.req, session)
+        self.assertIs(session.adapters["https://"], adapter)
+        self.assertEqual(session.proxies, {"https": "http://proxy.example"})
+        self.assertFalse(session.trust_env)
+        client.close()
+        session.close.assert_not_called()
+
     def test_get_config(self):
         session = mock.Mock()
-        session.get.return_value = _fake_resp({"Tomcat": {"Behinder": ["Listener"]}})
+        session.request.return_value = _fake_resp({"Tomcat": {"Behinder": ["Listener"]}})
         client = MemShellParty(base_url="https://example.test", session=session)
+
         cfg = client.get_config()
+
         self.assertEqual(cfg["Tomcat"]["Behinder"], ["Listener"])
-        session.get.assert_called_once()
-        self.assertIn("/api/config", session.get.call_args[0][0])
+        args, kwargs = session.request.call_args
+        self.assertEqual(args[0], "GET")
+        self.assertTrue(args[1].endswith("/api/config"))
+        self.assertEqual(kwargs["timeout"], 60)
         client.close()
 
     def test_generate_posts_json(self):
         session = mock.Mock()
-        session.post.return_value = _fake_resp(
+        session.request.return_value = _fake_resp(
             {
-                "packResult": "abc",
-                "memShellResult": {"shellClassName": "S", "shellToolConfig": {"pass": "p"}},
+                "packResult": "example-result",
+                "memShellResult": {
+                    "shellClassName": "ExampleShell",
+                    "shellToolConfig": {"pass": "example-pass"},
+                },
             }
         )
         client = MemShellParty(base_url="https://example.test/", session=session)
-        result = client.generate(shell_tool="Behinder", behinder_pass="p")
-        self.assertEqual(result["packResult"], "abc")
-        args, kwargs = session.post.call_args
-        self.assertTrue(args[0].endswith("/api/memshell/generate"))
+
+        result = client.generate(shell_tool="Behinder", behinder_pass="example-pass")
+
+        self.assertEqual(result["packResult"], "example-result")
+        args, kwargs = session.request.call_args
+        self.assertEqual(args[0], "POST")
+        self.assertTrue(args[1].endswith("/api/memshell/generate"))
         self.assertEqual(kwargs["json"]["shellConfig"]["shellTool"], "Behinder")
-        self.assertEqual(kwargs["json"]["shellToolConfig"]["behinderPass"], "p")
+        self.assertEqual(kwargs["json"]["shellToolConfig"]["behinderPass"], "example-pass")
         client.close()
 
-    def test_http_error_raises(self):
+    def test_transport_error_is_wrapped_and_preserves_cause(self):
         session = mock.Mock()
-        session.get.return_value = _fake_resp({"error": "boom"}, status_code=500)
+        cause = RequestsConnectionError(OSError(101, "example-sensitive-detail"))
+        session.request.side_effect = cause
         client = MemShellParty(base_url="https://example.test", session=session)
+
         with self.assertRaises(MemShellPartyError) as ctx:
             client.get_config()
-        self.assertIn("boom", str(ctx.exception))
+
+        self.assertIs(ctx.exception.__cause__, cause)
+        self.assertIsNone(ctx.exception.status_code)
+        self.assertIsNone(ctx.exception.body)
+        self.assertIn("GET https://example.test/api/config", str(ctx.exception))
+        self.assertIn("ConnectionError", str(ctx.exception))
+        self.assertIn("[Errno 101]", str(ctx.exception))
+        self.assertNotIn("example-sensitive-detail", str(ctx.exception))
         client.close()
 
-    def test_body_error_field_raises(self):
+    def test_transport_error_redacts_credentials_and_request_body(self):
         session = mock.Mock()
-        session.post.return_value = _fake_resp({"error": "bad combo"}, status_code=200)
+        session.request.side_effect = RequestsConnectionError(
+            "proxy https://proxy-user:proxy-pass@proxy.example unavailable"
+        )
+        client = MemShellParty(
+            base_url="https://api-user:api-pass@example.test",
+            session=session,
+        )
+
+        with self.assertRaises(MemShellPartyError) as ctx:
+            client.generate(
+                shell_tool="Behinder",
+                behinder_pass="example-pass",
+                shell_class_base64="example-class-data",
+            )
+
+        message = str(ctx.exception)
+        self.assertIn("POST https://example.test/api/memshell/generate", message)
+        self.assertIn("ConnectionError: transport error", message)
+        for secret in (
+            "api-user",
+            "api-pass",
+            "proxy-user",
+            "proxy-pass",
+            "example-pass",
+            "example-class-data",
+        ):
+            self.assertNotIn(secret, message)
+        client.close()
+
+    def test_transport_error_handles_malformed_base_url(self):
+        session = mock.Mock()
+        cause = RequestsConnectionError("example-sensitive-detail")
+        session.request.side_effect = cause
+        client = MemShellParty(base_url="https://[example-invalid", session=session)
+
+        with self.assertRaises(MemShellPartyError) as ctx:
+            client.get_config()
+
+        self.assertIs(ctx.exception.__cause__, cause)
+        self.assertIn("GET /api/config", str(ctx.exception))
+        self.assertNotIn("example-invalid", str(ctx.exception))
+        self.assertNotIn("example-sensitive-detail", str(ctx.exception))
+        client.close()
+
+    def test_transport_error_redacts_base_url_path(self):
+        session = mock.Mock()
+        session.request.side_effect = RequestsConnectionError("example-sensitive-detail")
+        client = MemShellParty(
+            base_url="https://example.test/example-path-secret",
+            session=session,
+        )
+
+        with self.assertRaises(MemShellPartyError) as ctx:
+            client.get_config()
+
+        message = str(ctx.exception)
+        self.assertIn("GET https://example.test/api/config", message)
+        self.assertNotIn("example-path-secret", message)
+        self.assertNotIn("example-sensitive-detail", message)
+        client.close()
+
+    def test_other_config_endpoints_use_session_request(self):
+        session = mock.Mock()
+        session.request.side_effect = [_fake_resp([]), _fake_resp({})]
         client = MemShellParty(base_url="https://example.test", session=session)
-        with self.assertRaises(MemShellPartyError):
+
+        self.assertEqual(client.get_packers_tree(), [])
+        self.assertEqual(client.get_command_configs(), {})
+
+        calls = session.request.call_args_list
+        self.assertEqual(calls[0].args[:2], ("GET", "https://example.test/api/config/packers/tree"))
+        self.assertEqual(
+            calls[1].args[:2],
+            ("GET", "https://example.test/api/config/command/configs"),
+        )
+        client.close()
+
+    def test_invalid_json_error_redacts_response_body(self):
+        session = mock.Mock()
+        response = mock.Mock()
+        response.status_code = 502
+        response.text = "example-sensitive-response-payload"
+        response.json.side_effect = ValueError("example-sensitive-parser-detail")
+        session.request.return_value = response
+        client = MemShellParty(base_url="https://example.test", session=session)
+
+        with self.assertRaises(MemShellPartyError) as ctx:
+            client.get_config()
+
+        self.assertEqual(str(ctx.exception), "invalid JSON response (HTTP 502)")
+        self.assertEqual(ctx.exception.status_code, 502)
+        self.assertIsNone(ctx.exception.body)
+        self.assertNotIn("example-sensitive", str(ctx.exception))
+        response.json.assert_called_once_with()
+        client.close()
+
+    def test_enhanced_response_invalid_json_has_no_output_side_effect(self):
+        session = mock.Mock()
+        response = EnhancedResponse()
+        response.status_code = 502
+        response.url = "https://example.test/api/config"
+        response._content = b"example-sensitive-response-payload"
+        response.encoding = "utf-8"
+        response._debug = False
+        session.request.return_value = response
+        client = MemShellParty(base_url="https://example.test", session=session)
+        standard_output = io.StringIO()
+        error_output = io.StringIO()
+
+        with (
+            mock.patch("sys.stdout", standard_output),
+            mock.patch("sys.stderr", error_output),
+            self.assertRaises(MemShellPartyError) as ctx,
+        ):
+            client.get_config()
+
+        self.assertEqual(str(ctx.exception), "invalid JSON response (HTTP 502)")
+        self.assertIsNone(ctx.exception.body)
+        self.assertEqual(standard_output.getvalue(), "")
+        self.assertEqual(error_output.getvalue(), "")
+        client.close()
+
+    def test_http_error_redacts_response_body_and_server_message(self):
+        session = mock.Mock()
+        session.request.return_value = _fake_resp(
+            {
+                "error": "example-sensitive-server-detail",
+                "packResult": "example-generated-payload",
+            },
+            status_code=500,
+        )
+        client = MemShellParty(base_url="https://example.test", session=session)
+
+        with self.assertRaises(MemShellPartyError) as ctx:
+            client.get_config()
+
+        self.assertEqual(str(ctx.exception), "HTTP 500")
+        self.assertEqual(ctx.exception.status_code, 500)
+        self.assertIsNone(ctx.exception.body)
+        self.assertNotIn("example-sensitive", str(ctx.exception))
+        self.assertNotIn("example-generated-payload", str(ctx.exception))
+        client.close()
+
+    def test_body_error_field_redacts_server_message(self):
+        session = mock.Mock()
+        session.request.return_value = _fake_resp(
+            {"error": "example-sensitive-server-detail"},
+            status_code=200,
+        )
+        client = MemShellParty(base_url="https://example.test", session=session)
+
+        with self.assertRaises(MemShellPartyError) as ctx:
             client.generate()
+
+        self.assertEqual(str(ctx.exception), "API response reported an error (HTTP 200)")
+        self.assertEqual(ctx.exception.status_code, 200)
+        self.assertIsNone(ctx.exception.body)
+        self.assertNotIn("example-sensitive", str(ctx.exception))
         client.close()
 
 
@@ -341,14 +583,14 @@ class TestMemshellCli(unittest.TestCase):
 
     def test_generate_writes_pack_result(self):
         fake_result = {
-            "packResult": "ONLY_PAYLOAD",
+            "packResult": "example-generated-payload",
             "memShellResult": {
-                "shellClassName": "pkg.Shell",
-                "injectorClassName": "pkg.Inj",
+                "shellClassName": "example.Shell",
+                "injectorClassName": "example.Injector",
                 "shellSize": 1,
                 "injectorSize": 2,
                 "shellConfig": {"shellTool": "Behinder"},
-                "shellToolConfig": {"pass": "secret"},
+                "shellToolConfig": {"pass": "example-pass"},
                 "injectorConfig": {"urlPattern": "/*"},
             },
         }
@@ -359,21 +601,23 @@ class TestMemshellCli(unittest.TestCase):
                 inst.generate.return_value = fake_result
                 buf = io.StringIO()
                 with mock.patch("sys.stdout", buf):
-                    code = memshell_main(["generate", "-o", str(out), "--password", "secret"])
+                    code = memshell_main(
+                        ["generate", "-o", str(out), "--password", "example-pass"]
+                    )
             self.assertEqual(code, 0)
-            self.assertEqual(out.read_text(encoding="utf-8"), "ONLY_PAYLOAD")
+            self.assertEqual(out.read_text(encoding="utf-8"), "example-generated-payload")
             meta = json.loads(buf.getvalue())
-            self.assertEqual(meta["shellClassName"], "pkg.Shell")
-            self.assertEqual(meta["shellToolConfig"]["pass"], "secret")
+            self.assertEqual(meta["shellClassName"], "example.Shell")
+            self.assertEqual(meta["shellToolConfig"]["pass"], "example-pass")
             self.assertIn("output", meta)
             self.assertNotIn("packResult", meta)
             # 通用 --password 应映射为 password 传给 generate
             kwargs = inst.generate.call_args.kwargs
-            self.assertEqual(kwargs.get("password"), "secret")
+            self.assertEqual(kwargs.get("password"), "example-pass")
 
     def test_cli_pass_maps_for_godzilla(self):
         fake_result = {
-            "packResult": "G",
+            "packResult": "example-godzilla-payload",
             "memShellResult": {
                 "shellClassName": "S",
                 "injectorClassName": "I",
@@ -394,9 +638,9 @@ class TestMemshellCli(unittest.TestCase):
                             "--shell-tool",
                             "Godzilla",
                             "--password",
-                            "gp",
+                            "example-pass",
                             "--key",
-                            "gk",
+                            "example-key",
                             "-o",
                             str(out),
                         ]
@@ -404,12 +648,12 @@ class TestMemshellCli(unittest.TestCase):
             self.assertEqual(code, 0)
             kwargs = inst.generate.call_args.kwargs
             self.assertEqual(kwargs.get("shell_tool"), "Godzilla")
-            self.assertEqual(kwargs.get("password"), "gp")
-            self.assertEqual(kwargs.get("key"), "gk")
+            self.assertEqual(kwargs.get("password"), "example-pass")
+            self.assertEqual(kwargs.get("key"), "example-key")
 
     def test_cli_case_insensitive_and_hidden_flags(self):
         fake_result = {
-            "packResult": "X",
+            "packResult": "example-case-insensitive-payload",
             "memShellResult": {
                 "shellClassName": "S",
                 "injectorClassName": "I",
@@ -436,7 +680,7 @@ class TestMemshellCli(unittest.TestCase):
                             "--jre",
                             "9",
                             "--behinder-pass",
-                            "hidden-ok",
+                            "example-pass",
                             "--target-jre-version",
                             "8",
                             "-o",
@@ -449,13 +693,13 @@ class TestMemshellCli(unittest.TestCase):
             self.assertEqual(kwargs.get("shell_tool"), "behinder")
             self.assertEqual(kwargs.get("shell_type"), "filter")
             self.assertEqual(kwargs.get("jre"), "9")
-            self.assertEqual(kwargs.get("behinder_pass"), "hidden-ok")
+            self.assertEqual(kwargs.get("behinder_pass"), "example-pass")
             # --jre 优先，不应再带 target_jre_version
             self.assertNotIn("target_jre_version", kwargs)
 
     def test_cli_hidden_target_jre_still_works(self):
         fake_result = {
-            "packResult": "Y",
+            "packResult": "example-target-jre-payload",
             "memShellResult": {
                 "shellClassName": "S",
                 "injectorClassName": "I",
@@ -499,10 +743,118 @@ class TestMemshellCli(unittest.TestCase):
         self.assertIn("body.shellConfig must be an object", error_output.getvalue())
         self.assertNotIn("Traceback", error_output.getvalue())
 
+    def test_cli_redacts_unwrapped_request_exception(self):
+        error_output = io.StringIO()
+        with mock.patch("wtfutil.memshell.MemShellParty") as client_class:
+            client_class.return_value.get_config.side_effect = RequestsConnectionError(
+                "proxy https://example-user:example-pass@proxy.example unavailable"
+            )
+            with mock.patch("sys.stderr", error_output):
+                code = memshell_main(["config"])
+
+        message = error_output.getvalue()
+        self.assertEqual(code, 1)
+        self.assertIn("request failed: transport error", message)
+        self.assertNotIn("example-user", message)
+        self.assertNotIn("example-pass", message)
+        self.assertNotIn("Traceback", message)
+
+    def test_cli_redacts_body_file_os_error(self):
+        error_output = io.StringIO()
+        file_error = OSError(
+            5,
+            "example-sensitive-os-detail",
+            "example-sensitive-body-path.json",
+        )
+        with mock.patch("builtins.open", side_effect=file_error), mock.patch(
+            "sys.stderr", error_output
+        ):
+            code = memshell_main(
+                ["generate", "--body", "example-sensitive-body-path.json"]
+            )
+
+        message = error_output.getvalue()
+        self.assertEqual(code, 1)
+        self.assertIn("I/O error [Errno 5]", message)
+        self.assertNotIn("example-sensitive", message)
+        self.assertNotIn("Traceback", message)
+
+    def test_cli_redacts_invalid_json_input(self):
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            body_path = Path(temporary_directory) / "example-body.json"
+            body_path.write_text("{example-sensitive-json-content", encoding="utf-8")
+            error_output = io.StringIO()
+
+            with mock.patch("sys.stderr", error_output):
+                code = memshell_main(["generate", "--body", str(body_path)])
+
+        message = error_output.getvalue()
+        self.assertEqual(code, 1)
+        self.assertIn("invalid JSON input", message)
+        self.assertNotIn("example-sensitive", message)
+        self.assertNotIn("Traceback", message)
+
+    def test_cli_redacts_invalid_utf8_input(self):
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            body_path = Path(temporary_directory) / "example-body.json"
+            body_path.write_bytes(b"\xffexample-sensitive-utf8-content")
+            error_output = io.StringIO()
+
+            with mock.patch("sys.stderr", error_output):
+                code = memshell_main(["generate", "--body", str(body_path)])
+
+        message = error_output.getvalue()
+        self.assertEqual(code, 1)
+        self.assertIn("invalid UTF-8 input", message)
+        self.assertNotIn("example-sensitive", message)
+        self.assertNotIn("Traceback", message)
+
+    def test_cli_redacts_output_file_os_error(self):
+        error_output = io.StringIO()
+        file_error = OSError(
+            5,
+            "example-sensitive-os-detail",
+            "example-sensitive-output-path.txt",
+        )
+        with (
+            mock.patch("wtfutil.memshell.MemShellParty") as client_class,
+            mock.patch("pathlib.Path.write_text", side_effect=file_error),
+            mock.patch("sys.stderr", error_output),
+        ):
+            client_class.return_value.generate.return_value = {
+                "packResult": "example-generated-payload",
+                "memShellResult": {},
+            }
+            code = memshell_main(
+                ["generate", "-o", "example-sensitive-output-path.txt"]
+            )
+
+        message = error_output.getvalue()
+        self.assertEqual(code, 1)
+        self.assertIn("I/O error [Errno 5]", message)
+        self.assertNotIn("example-sensitive", message)
+        self.assertNotIn("Traceback", message)
+
+    def test_cli_reports_wrapped_transport_error_without_traceback(self):
+        error_output = io.StringIO()
+        with mock.patch("wtfutil.memshell.MemShellParty") as client_class:
+            client_class.return_value.get_config.side_effect = MemShellPartyError(
+                "GET https://example.test/api/config request failed: ConnectionError"
+            )
+            with mock.patch("sys.stderr", error_output):
+                code = memshell_main(["config"])
+
+        self.assertEqual(code, 1)
+        self.assertIn("request failed", error_output.getvalue())
+        self.assertNotIn("Traceback", error_output.getvalue())
+
     def test_generate_empty_pack_uses_all_pack_results(self):
         fake_result = {
             "packResult": "",
-            "allPackResults": {"DefaultBase64": "x", "GzipBase64": "y"},
+            "allPackResults": {
+                "DefaultBase64": "example-default-payload",
+                "GzipBase64": "example-gzip-payload",
+            },
             "memShellResult": {
                 "shellClassName": "S",
                 "injectorClassName": "I",
@@ -521,7 +873,7 @@ class TestMemshellCli(unittest.TestCase):
                 code = memshell_main(["generate", "-o", str(out)])
             self.assertEqual(code, 0)
             data = json.loads(out.read_text(encoding="utf-8"))
-            self.assertEqual(data["GzipBase64"], "y")
+            self.assertEqual(data["GzipBase64"], "example-gzip-payload")
 
     def test_install_skill_project(self):
         with tempfile.TemporaryDirectory() as td:
@@ -567,8 +919,8 @@ class TestMemShellPartyLive(unittest.TestCase):
                 shell_tool="Behinder",
                 shell_type="Listener",
                 target_jre_version=50,
-                behinder_pass="testpass",
-                header_value="testua",
+                behinder_pass="example-pass",
+                header_value="example-token",
                 packer="DefaultBase64",
             )
         self.assertTrue(result.get("packResult"))
@@ -591,9 +943,9 @@ class TestMemShellPartyLive(unittest.TestCase):
                         "--shell-type",
                         "Listener",
                         "--password",
-                        "clipass",
+                        "example-pass",
                         "--header-value",
-                        "clihdr",
+                        "example-token",
                         "-o",
                         str(out),
                     ]

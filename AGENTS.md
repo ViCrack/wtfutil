@@ -101,6 +101,7 @@ session = httputil.requests_session()
   - 默认 `https://party.mem.mk`；`[memshell] BASE_URL` / env `MEMSHELL_BASE_URL`（经 `configutil`）；默认 `shellTool=Behinder`；**无内置缓存**（调用方自行缓存）。
   - 目标运行时用 `jre=` / CLI `--jre`（6/8/9/11/17/21/22，后续版本按标准映射）；兼容 `target_jre_version`。
   - `server` / `shell_tool` / `shell_type` 已知名称内忽略大小写。
+  - 内部 session 默认仅对连接阶段失败重试 2 次；网络异常统一包装为 `MemShellPartyError`，不得在错误信息或日志中输出请求体、响应载荷、凭证或生成载荷；外部 session 的重试策略不被修改。
   - 通用凭证：`password` / `key`（或 CLI `--password` / `--key`）按 `shellTool` 映射到 `behinderPass` / `godzillaPass`+`godzillaKey` / `antSwordPass`。
   - 文档：`docs/en/memshellutil.md`、`docs/zh/memshellutil.md`；测试：`tests/test_memshell.py`（含可选 live 联调）。
 
@@ -187,7 +188,19 @@ fileutil.py / sqlutil.py / singleinstance.py（无其它 wtfutil 模块依赖）
 
 ---
 
-### 7. Git 提交说明（Agent 撰写 commit message）
+### 7. 敏感信息保护
+
+Agent 修改代码、测试、文档、日志和提交内容时必须遵守：
+
+1. 禁止提交密码、API key、Token、Cookie、Authorization、私钥、证书私钥、真实代理凭证或完整真实环境配置。
+2. 禁止提交 MemShellParty 的真实凭证、`shellClassBase64`、`packResult`、`allPackResults` 或其他可直接使用的生成载荷。
+3. 示例和测试只使用明显的虚构值，例如 `example-pass`、`example-key`；不要使用看起来像真实密钥的长随机字符串。
+4. 异常、调试日志和 CLI stderr 不得包含请求体、响应载荷、认证头或代理凭证；CLI 成功 stdout 和输出文件按用户明确请求的命令契约返回结果。
+5. 提交前检查暂存差异；发现疑似敏感信息时停止提交，先移除并提示轮换已经暴露的凭证。
+
+---
+
+### 8. Git 提交说明（Agent 撰写 commit message）
 
 **仅在用户明确要求提交时**才执行 `git commit`；message **一律使用简体中文**。
 

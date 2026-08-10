@@ -20,8 +20,8 @@ with MemShellParty() as client:
         shell_tool="behinder",   # 不区分大小写
         shell_type="listener",
         jre=9,                   # Java/JRE 发行版本；≥9 时自动 byPassJavaModule=True
-        password="pass",         # 通用密码 → behinderPass
-        header_value="secret",   # 请求头门槛（默认 header_name=User-Agent）
+        password="example-pass",         # 通用密码 → behinderPass
+        header_value="example-token",    # 请求头门槛（默认 header_name=User-Agent）
     )
     payload = result["packResult"]           # 打包后的可投递字符串
     info = result["memShellResult"]          # 类名、尺寸、连接参数等
@@ -74,7 +74,9 @@ client = MemShellParty(base_url="http://127.0.0.1:8080", timeout=120)
 |------|------|------|
 | `base_url` | 见上节 | 服务根地址（无尾斜杠亦可） |
 | `timeout` | `60` | 单次请求超时（秒）；生成可能较慢，可酌情加大 |
-| `session` | 内部新建 | `wtfutil.httputil` 的增强 Session |
+| `session` | 内部新建 | `wtfutil.httputil` 的增强 Session；传入后由调用方管理重试策略 |
+| `connect_retries` | `2` | 仅重试连接阶段失败；`0` 表示关闭 |
+| `retry_backoff` | `0.25` | 连接重试退避因子，必须是有限的非负数 |
 
 ---
 
@@ -136,27 +138,35 @@ with MemShellParty() as client:
 
 | 写法 | 行为 |
 |------|------|
-| `password="x"` | 按当前 `shell_tool` 映射到冰蝎 / 哥斯拉 / 蚁剑的 `*Pass` |
-| `key="k"` | 写入哥斯拉 `godzillaKey`（其它工具一般无意义） |
+| `password="example-pass"` | 按当前 `shell_tool` 映射到冰蝎 / 哥斯拉 / 蚁剑的 `*Pass` |
+| `key="example-key"` | 写入哥斯拉 `godzillaKey`（其它工具一般无意义） |
 | `behinder_pass` / `godzilla_pass` / `godzilla_key` / `ant_sword_pass` | 高级：专用字段优先于通用 `password` / `key`（日常用通用即可） |
 | 密码类留空 | 服务端随机生成，结果在 `memShellResult.shellToolConfig` 中回传 |
 | `header_name` + `header_value` | 匹配该请求头后才进入马逻辑；`header_value` 常需自行设定 |
 
 ```python
 # 通用写法
-client.generate(shell_tool="Behinder", password="p1", header_value="tok")
+client.generate(
+    shell_tool="Behinder",
+    password="example-pass",
+    header_value="example-token",
+)
 
 # 哥斯拉
 client.generate(
     shell_tool="Godzilla",
     shell_type="Filter",
-    password="pass",
-    key="key",
-    header_value="tok",
+    password="example-pass",
+    key="example-key",
+    header_value="example-token",
 )
 
 # 专用字段覆盖通用 password
-client.generate(shell_tool="Behinder", password="ignored", behinder_pass="real")
+client.generate(
+    shell_tool="Behinder",
+    password="example-unused-pass",
+    behinder_pass="example-override-pass",
+)
 ```
 
 ### 参数对照表
@@ -211,7 +221,7 @@ payload = result["packResult"]
 mem = result["memShellResult"]
 print(mem["shellClassName"], mem["injectorClassName"])
 print(mem["shellSize"], mem["injectorSize"])
-print(mem["shellToolConfig"])  # 含实际密码等（若曾留空随机）
+print(mem["shellToolConfig"])  # 密码留空时会包含服务端生成的连接凭证
 ```
 
 若只要紧凑元信息、不要大段 `packResult`，可用：
@@ -237,9 +247,9 @@ with MemShellParty() as client:
         shell_type="Filter",
         jre=8,
         url_pattern="/*",
-        password="admin",
+        password="example-pass",
         header_name="User-Agent",
-        header_value="Mozilla/5.0-mem",
+        header_value="example-token",
         packer="DefaultBase64",
     )
     open("payload.txt", "w", encoding="utf-8").write(r["packResult"])
@@ -257,7 +267,7 @@ with MemShellParty() as client:
         command_param_name="cmd",
         encryptor="RAW",
         implementation_class="RuntimeExec",
-        header_value="x",
+        header_value="example-token",
     )
 ```
 
@@ -266,7 +276,10 @@ with MemShellParty() as client:
 ```python
 body = {
     "shellConfig": {"server": "Tomcat", "shellTool": "Behinder", "shellType": "Listener"},
-    "shellToolConfig": {"behinderPass": "p", "headerValue": "h"},
+    "shellToolConfig": {
+        "behinderPass": "example-pass",
+        "headerValue": "example-token",
+    },
     "injectorConfig": {"urlPattern": "/*"},
     "packer": "DefaultBase64",
 }
@@ -279,7 +292,12 @@ result = client.generate(body=body, jre=9)
 ```python
 from wtfutil.memshellutil import build_generate_body
 
-req = build_generate_body(shell_tool="Godzilla", password="p", key="k", header_value="h")
+req = build_generate_body(
+    shell_tool="Godzilla",
+    password="example-pass",
+    key="example-key",
+    header_value="example-token",
+)
 result = client.generate(body=req)
 ```
 
@@ -291,9 +309,9 @@ result = client.generate(body=req)
 
 | 属性 | 含义 |
 |------|------|
-| `str(e)` / `args` | 错误信息（优先服务端 `error` 字段） |
+| `str(e)` / `args` | 固定错误类别与 HTTP 状态码；网络错误另含脱敏目标、异常类型和 errno 摘要 |
 | `e.status_code` | HTTP 状态码（可能为 `None`） |
-| `e.body` | 原始响应 body（dict 或文本片段） |
+| `e.body` | 兼容属性；SDK 产生的错误保持为 `None`，不保存原始响应 |
 
 ```python
 from wtfutil.memshellutil import MemShellParty, MemShellPartyError
@@ -302,10 +320,10 @@ try:
     with MemShellParty() as client:
         client.generate(shell_type="NotExist")
 except MemShellPartyError as e:
-    print(e, e.status_code, e.body)
+    print(e, e.status_code)
 ```
 
-常见原因：组合不合法、服务不可达、响应非 JSON、超时。网络层异常也可能以底层 `requests` 异常直接抛出，按需外层再包一层。
+常见原因：组合不合法、服务不可达、响应非 JSON、超时。HTTP 错误、非 JSON 响应和响应中的 `error` 字段只公开固定错误类别与状态码，不包含服务端原文或响应载荷；JSON 解析异常可通过 `e.__cause__` 检查。网络层 `requests` 异常统一包装为 `MemShellPartyError`，原异常同样可通过 `e.__cause__` 检查。内部 session 默认仅重试连接阶段失败 2 次；不重试读取超时、HTTP 状态错误或响应解析错误。外部传入的 session 保留调用方自己的重试策略。
 
 ---
 
