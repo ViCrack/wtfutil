@@ -74,7 +74,9 @@ Constructor args:
 |-----|---------|--------|
 | `base_url` | see above | Service root (trailing slash optional) |
 | `timeout` | `60` | Per-request timeout in seconds; raise if generate is slow |
-| `session` | created internally | Enhanced session from `wtfutil.httputil` |
+| `session` | created internally | Enhanced session from `wtfutil.httputil`; caller controls retries when supplied |
+| `connect_retries` | `2` | Retry connection-establishment failures only; `0` disables retries |
+| `retry_backoff` | `0.25` | Connection retry backoff factor; must be finite and non-negative |
 
 ---
 
@@ -305,7 +307,7 @@ except MemShellPartyError as e:
     print(e, e.status_code, e.body)
 ```
 
-Typical causes: illegal combo, unreachable host, non-JSON response, timeout. Transport errors may also surface as raw `requests` exceptions—wrap those if you need a single catch-all.
+Typical causes: illegal combo, unreachable host, non-JSON response, or timeout. Transport-level `requests` exceptions are wrapped in `MemShellPartyError`, with the original exception available as `e.__cause__`. Internally owned sessions retry connection-establishment failures twice by default. Read timeouts, HTTP status failures, and response parsing failures are not retried. Externally supplied sessions keep the caller's retry policy.
 
 ---
 

@@ -74,7 +74,9 @@ client = MemShellParty(base_url="http://127.0.0.1:8080", timeout=120)
 |------|------|------|
 | `base_url` | 见上节 | 服务根地址（无尾斜杠亦可） |
 | `timeout` | `60` | 单次请求超时（秒）；生成可能较慢，可酌情加大 |
-| `session` | 内部新建 | `wtfutil.httputil` 的增强 Session |
+| `session` | 内部新建 | `wtfutil.httputil` 的增强 Session；传入后由调用方管理重试策略 |
+| `connect_retries` | `2` | 仅重试连接阶段失败；`0` 表示关闭 |
+| `retry_backoff` | `0.25` | 连接重试退避因子，必须是有限的非负数 |
 
 ---
 
@@ -305,7 +307,7 @@ except MemShellPartyError as e:
     print(e, e.status_code, e.body)
 ```
 
-常见原因：组合不合法、服务不可达、响应非 JSON、超时。网络层异常也可能以底层 `requests` 异常直接抛出，按需外层再包一层。
+常见原因：组合不合法、服务不可达、响应非 JSON、超时。网络层 `requests` 异常统一包装为 `MemShellPartyError`，原异常可通过 `e.__cause__` 检查。内部 session 默认仅重试连接阶段失败 2 次；不重试读取超时、HTTP 状态错误或响应解析错误。外部传入的 session 保留调用方自己的重试策略。
 
 ---
 

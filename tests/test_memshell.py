@@ -669,6 +669,19 @@ class TestMemshellCli(unittest.TestCase):
         self.assertIn("body.shellConfig must be an object", error_output.getvalue())
         self.assertNotIn("Traceback", error_output.getvalue())
 
+    def test_cli_reports_wrapped_transport_error_without_traceback(self):
+        error_output = io.StringIO()
+        with mock.patch("wtfutil.memshell.MemShellParty") as client_class:
+            client_class.return_value.get_config.side_effect = MemShellPartyError(
+                "GET https://example.test/api/config request failed: ConnectionError"
+            )
+            with mock.patch("sys.stderr", error_output):
+                code = memshell_main(["config"])
+
+        self.assertEqual(code, 1)
+        self.assertIn("request failed", error_output.getvalue())
+        self.assertNotIn("Traceback", error_output.getvalue())
+
     def test_generate_empty_pack_uses_all_pack_results(self):
         fake_result = {
             "packResult": "",
