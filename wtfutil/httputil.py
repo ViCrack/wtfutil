@@ -3,24 +3,23 @@ import ipaddress
 import json
 import os
 import random
+import re
 import socket
 import ssl
 import threading
 import time
-import re
 from concurrent import futures
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from io import BytesIO
 from socket import gethostbyname
-from typing import Callable, List, Generator, Tuple, Optional, Union, Dict, Any, Iterable
-from urllib.parse import urljoin
-from urllib.parse import urlparse
+from typing import Any, Callable, Dict, Generator, Iterable, List, Optional, Tuple, Union
+from urllib.parse import urljoin, urlparse
 
-from fake_useragent import UserAgent
 import requests
 import tldextract
 import urllib3
+from fake_useragent import UserAgent
 from requests import Response
 from requests.adapters import HTTPAdapter
 from requests.exceptions import JSONDecodeError

@@ -323,7 +323,7 @@ except MemShellPartyError as e:
     print(e, e.status_code)
 ```
 
-Typical causes include an illegal combination, unreachable host, non-JSON response, or timeout. HTTP errors, non-JSON responses, and response `error` fields expose only a fixed error category and status code, never the server text or response payload; JSON parsing failures remain available through `e.__cause__`. Transport-level `requests` exceptions are also wrapped in `MemShellPartyError`, with the original exception available as `e.__cause__`. Internally owned sessions retry connection-establishment failures twice by default. Read timeouts, HTTP status failures, and response parsing failures are not retried. Externally supplied sessions keep the caller's retry policy.
+Typical causes include an illegal combination, unreachable host, non-JSON response, or timeout. HTTP errors, non-JSON responses, and response `error` fields expose only a fixed error category and status code, never the server text or response payload. Transport-level `requests` exceptions are also wrapped in `MemShellPartyError`; the wrapper deliberately suppresses the original exception context so tracebacks cannot expose credentials, request bodies, proxy details, or response payloads. Internally owned sessions retry connection-establishment failures twice by default. Read timeouts, HTTP status failures, and response parsing failures are not retried. Externally supplied sessions keep the caller's retry policy. The internal retry policy supports both modern and legacy urllib3 constructor names.
 
 ---
 

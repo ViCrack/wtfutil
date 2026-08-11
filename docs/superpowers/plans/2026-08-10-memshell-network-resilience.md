@@ -4,9 +4,9 @@
 
 **目标：** 为 `MemShellParty` 增加安全的连接级重试、统一且不泄露敏感信息的网络异常，并在 `AGENTS.md` 固化敏感信息保护规则。
 
-**架构：** 重试策略只在 `MemShellParty` 内部创建 session 时通过 urllib3 `Retry` 注入，不改变通用 `requests_session()` 的默认行为，也不修改外部传入 session。四个 API 方法统一经过私有 `_request()`，网络异常转换为 `MemShellPartyError` 并保留原始异常链；HTTP 和 JSON 响应继续由 `_parse_response()` 处理。
+**架构：** 重试策略只在 `MemShellParty` 内部创建 session 时通过 urllib3 `Retry` 注入，不改变通用 `requests_session()` 的默认行为，也不修改外部传入 session。四个 API 方法统一经过私有 `_request()`，网络异常转换为 `MemShellPartyError` 并抑制原始异常链，避免 traceback 泄露敏感信息；HTTP 和 JSON 响应继续由 `_parse_response()` 处理。
 
-**技术栈：** Python 3.10+、requests 2.x、urllib3 2.x、stdlib `unittest` / `unittest.mock`、Git。
+**技术栈：** Python 3.10+、requests 2.x、urllib3、stdlib `unittest` / `unittest.mock`、Git。
 
 ---
 
@@ -194,8 +194,12 @@ from urllib3.util import Retry
             raise TypeError("retry_backoff must be a finite non-negative number")
         try:
             retry_backoff_value = float(retry_backoff)
-        except (TypeError, ValueError) as exc:
-            raise TypeError("retry_backoff must be a finite non-negative number") from exc
+        except (TypeError, ValueError):
+            invalid_retry_backoff = True
+        else:
+            invalid_retry_backoff = False
+        if invalid_retry_backoff:
+            raise TypeError("retry_backoff must be a finite non-negative number")
         if retry_backoff_value < 0 or not math.isfinite(retry_backoff_value):
             raise ValueError("retry_backoff must be a finite non-negative number")
 
@@ -206,16 +210,7 @@ from urllib3.util import Retry
         self.retry_backoff = retry_backoff_value
         self._owns_session = session is None
         if session is None:
-            retry = Retry(
-                total=connect_retries,
-                connect=connect_retries,
-                read=0,
-                status=0,
-                other=0,
-                redirect=0,
-                backoff_factor=retry_backoff_value,
-                allowed_methods=frozenset({"GET", "POST"}),
-            )
+            retry = _build_connect_retry(connect_retries, retry_backoff_value)
             self.req = requests_session(timeout=timeout, max_retries=retry)
         else:
             self.req = session
@@ -309,7 +304,7 @@ from requests.exceptions import ConnectionError as RequestsConnectionError
 增加：
 
 ```python
-    def test_transport_error_is_wrapped_and_preserves_cause(self):
+    def test_transport_error_is_wrapped_without_exposing_original_exception(self):
         session = mock.Mock()
         cause = RequestsConnectionError(OSError(101, "example-sensitive-detail"))
         session.request.side_effect = cause
@@ -318,7 +313,8 @@ from requests.exceptions import ConnectionError as RequestsConnectionError
         with self.assertRaises(MemShellPartyError) as ctx:
             client.get_config()
 
-        self.assertIs(ctx.exception.__cause__, cause)
+        self.assertIsNone(ctx.exception.__cause__)
+        self.assertIsNone(ctx.exception.__context__)
         self.assertIsNone(ctx.exception.status_code)
         self.assertIsNone(ctx.exception.body)
         self.assertIn("GET https://example.test/api/config", str(ctx.exception))
@@ -369,7 +365,8 @@ from requests.exceptions import ConnectionError as RequestsConnectionError
         with self.assertRaises(MemShellPartyError) as ctx:
             client.get_config()
 
-        self.assertIs(ctx.exception.__cause__, cause)
+        self.assertIsNone(ctx.exception.__cause__)
+        self.assertIsNone(ctx.exception.__context__)
         self.assertIn("GET /api/config", str(ctx.exception))
         self.assertNotIn("example-invalid", str(ctx.exception))
         self.assertNotIn("example-sensitive-detail", str(ctx.exception))
@@ -480,12 +477,12 @@ def _safe_transport_error(exc: RequestException) -> str:
             retry_note = ""
             if self._owns_session:
                 retry_note = f" with up to {self.connect_retries} connection retries"
-            message = (
+            request_error_message = (
                 f"{method.upper()} {_safe_request_url(self.base_url, path)} "
                 f"request failed{retry_note}: "
                 f"{type(exc).__name__}: {_safe_transport_error(exc)}"
             )
-            raise MemShellPartyError(message) from exc
+        raise MemShellPartyError(request_error_message)
 ```
 
 四个 API 方法改为：
@@ -576,7 +573,7 @@ python -m unittest tests.test_memshell.TestMemshellCli.test_cli_reports_wrapped_
 在错误处理章节将“网络层异常可能直接抛出”改为：
 
 ```markdown
-网络层 `requests` 异常统一包装为 `MemShellPartyError`，原异常保存在 `e.__cause__`。内部 session 默认只对连接阶段失败重试 2 次；不重试读取超时、HTTP 状态错误或响应解析错误。外部传入的 session 保留调用方自己的重试策略。
+网络层 `requests` 异常统一包装为 `MemShellPartyError`，并抑制原始异常上下文，避免 traceback 泄露敏感信息。内部 session 默认只对连接阶段失败重试 2 次；不重试读取超时、HTTP 状态错误或响应解析错误。外部传入的 session 保留调用方自己的重试策略。
 ```
 
 - [ ] **步骤 4：同步英文文档**
@@ -591,7 +588,7 @@ python -m unittest tests.test_memshell.TestMemshellCli.test_cli_reports_wrapped_
 错误说明使用：
 
 ```markdown
-Transport-level `requests` exceptions are wrapped in `MemShellPartyError`, with the original exception available as `e.__cause__`. Internally owned sessions retry connection-establishment failures twice by default. Read timeouts, HTTP status failures, and response parsing failures are not retried. Externally supplied sessions keep the caller's retry policy.
+Transport-level `requests` exceptions are wrapped in `MemShellPartyError` with the original exception context suppressed, so tracebacks cannot expose sensitive details. Internally owned sessions retry connection-establishment failures twice by default. Read timeouts, HTTP status failures, and response parsing failures are not retried. Externally supplied sessions keep the caller's retry policy.
 ```
 
 - [ ] **步骤 5：更新 AGENTS.md 模块简介**

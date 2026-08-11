@@ -7,9 +7,9 @@ import queue
 import sys
 import threading
 import time
-from pathlib import Path
 from collections import defaultdict
 from functools import wraps
+from pathlib import Path
 from typing import Any, Dict, Iterable, List, Union
 
 from ._resource import find_resource_directory, resolve_resource_path

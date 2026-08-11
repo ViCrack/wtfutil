@@ -171,6 +171,32 @@ _SHELL_TOOL_LOOKUP = _casefold_lookup(KNOWN_SHELL_TOOLS)
 _SHELL_TYPE_LOOKUP = _casefold_lookup(KNOWN_SHELL_TYPES)
 
 
+def _build_connect_retry(connect_retries: int, retry_backoff: float) -> Retry:
+    """Build a connection-only retry policy across supported urllib3 versions."""
+    retry_arguments = {
+        "total": connect_retries,
+        "connect": connect_retries,
+        "read": 0,
+        "status": 0,
+        "redirect": 0,
+        "backoff_factor": retry_backoff,
+    }
+    retry_methods = frozenset({"GET", "POST"})
+
+    try:
+        return Retry(
+            **retry_arguments,
+            other=0,
+            allowed_methods=retry_methods,
+        )
+    except TypeError:
+        # urllib3 1.25 calls this option method_whitelist and has no ``other``.
+        return Retry(
+            **retry_arguments,
+            method_whitelist=retry_methods,
+        )
+
+
 class MemShellPartyError(Exception):
     """MemShellParty API 调用失败。"""
 
@@ -188,14 +214,18 @@ def resolve_jre_class_version(value: int | str) -> int:
     - 已是 class 主版本（如 ``50``、``61``）则原样返回
     """
     try:
-        v = int(value)
-    except (TypeError, ValueError) as exc:
-        raise ValueError("invalid jre / target_jre_version") from exc
-    if v in JRE_RELEASE_TO_CLASS:
-        return JRE_RELEASE_TO_CLASS[v]
-    if 1 <= v < 45:
-        return v + 44
-    return v
+        version_value = int(value)
+    except (TypeError, ValueError):
+        invalid_version = True
+    else:
+        invalid_version = False
+    if invalid_version:
+        raise ValueError("invalid jre / target_jre_version")
+    if version_value in JRE_RELEASE_TO_CLASS:
+        return JRE_RELEASE_TO_CLASS[version_value]
+    if 1 <= version_value < 45:
+        return version_value + 44
+    return version_value
 
 
 def canonicalize_server(value: str) -> str:
@@ -564,8 +594,12 @@ class MemShellParty:
             raise TypeError("retry_backoff must be a finite non-negative number")
         try:
             retry_backoff_value = float(retry_backoff)
-        except (TypeError, ValueError) as exc:
-            raise TypeError("retry_backoff must be a finite non-negative number") from exc
+        except (TypeError, ValueError):
+            invalid_retry_backoff = True
+        else:
+            invalid_retry_backoff = False
+        if invalid_retry_backoff:
+            raise TypeError("retry_backoff must be a finite non-negative number")
         if retry_backoff_value < 0 or not math.isfinite(retry_backoff_value):
             raise ValueError("retry_backoff must be a finite non-negative number")
 
@@ -576,16 +610,7 @@ class MemShellParty:
         self.retry_backoff = retry_backoff_value
         self._owns_session = session is None
         if session is None:
-            retry = Retry(
-                total=connect_retries,
-                connect=connect_retries,
-                read=0,
-                status=0,
-                other=0,
-                redirect=0,
-                backoff_factor=retry_backoff_value,
-                allowed_methods=frozenset({"GET", "POST"}),
-            )
+            retry = _build_connect_retry(connect_retries, retry_backoff_value)
             self.req = requests_session(timeout=timeout, max_retries=retry)
         else:
             self.req = session
@@ -615,12 +640,12 @@ class MemShellParty:
             retry_note = ""
             if self._owns_session:
                 retry_note = f" with up to {self.connect_retries} connection retries"
-            message = (
+            request_error_message = (
                 f"{method.upper()} {_safe_request_url(self.base_url, path)} "
                 f"request failed{retry_note}: "
                 f"{type(exc).__name__}: {_safe_transport_error(exc)}"
             )
-            raise MemShellPartyError(message) from exc
+        raise MemShellPartyError(request_error_message)
 
     def _parse_response(self, resp: Any) -> Any:
         """解析 JSON；错误仅公开固定类别和 HTTP 状态码。"""
@@ -629,21 +654,28 @@ class MemShellParty:
                 data = Response.json(resp)
             else:
                 data = resp.json()
-        except Exception as exc:
-            raise MemShellPartyError(
-                f"invalid JSON response (HTTP {resp.status_code})",
-                status_code=resp.status_code,
-            ) from exc
+        except Exception:
+            response_status_code = resp.status_code
+            response_is_invalid_json = True
+        else:
+            response_status_code = resp.status_code
+            response_is_invalid_json = False
 
-        if resp.status_code >= 400:
+        if response_is_invalid_json:
             raise MemShellPartyError(
-                f"HTTP {resp.status_code}",
-                status_code=resp.status_code,
+                f"invalid JSON response (HTTP {response_status_code})",
+                status_code=response_status_code,
+            ) from None
+
+        if response_status_code >= 400:
+            raise MemShellPartyError(
+                f"HTTP {response_status_code}",
+                status_code=response_status_code,
             )
         if isinstance(data, dict) and data.get("error"):
             raise MemShellPartyError(
-                f"API response reported an error (HTTP {resp.status_code})",
-                status_code=resp.status_code,
+                f"API response reported an error (HTTP {response_status_code})",
+                status_code=response_status_code,
             )
         return data
 

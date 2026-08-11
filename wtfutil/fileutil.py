@@ -6,8 +6,7 @@ import subprocess
 import zipfile
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from typing import Optional
-from typing import Union
+from typing import Optional, Union
 
 
 def _calculate_file_hash(file_path: str | Path, algorithm: str) -> str:

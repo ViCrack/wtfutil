@@ -17,13 +17,13 @@ import sys
 
 import psutil
 import questionary
+from rich import box
 from rich.console import Console
 from rich.table import Table
-from rich import box
 
 from .procutil import (
-    find_python_process_details_by_script,
     find_python_process_details_by_cmdline,
+    find_python_process_details_by_script,
     list_all_python_process_details,
 )
 

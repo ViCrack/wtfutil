@@ -13,10 +13,9 @@ import sys
 import unicodedata
 from functools import lru_cache, wraps
 from typing import Any
-from urllib.parse import unquote, quote
+from urllib.parse import quote, unquote
 
-from Crypto.Cipher import DES
-from Crypto.Cipher import PKCS1_v1_5
+from Crypto.Cipher import DES, PKCS1_v1_5
 from Crypto.PublicKey import RSA
 from Crypto.Util.Padding import pad, unpad
 from requests.structures import CaseInsensitiveDict

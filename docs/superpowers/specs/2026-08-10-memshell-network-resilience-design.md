@@ -25,7 +25,7 @@ Failed to establish a new connection: [Errno 101] Network is unreachable
 1. 仅增强 `wtfutil.memshellutil.MemShellParty`，不改变通用 HTTP 层的默认行为。
 2. 对服务端大概率尚未收到请求的连接阶段错误做少量自动重试。
 3. 不自动重试可能已经被服务端处理的请求，避免重复执行 `POST /api/memshell/generate`。
-4. 将网络异常统一包装为 `MemShellPartyError`，同时保留原始异常链。
+4. 将网络异常统一包装为 `MemShellPartyError`，并抑制原始异常链，避免 traceback 泄露敏感信息。
 5. 错误信息可用于定位问题，但不得泄露生成请求中的密码、key、Base64 类数据等敏感内容。
 6. 保持现有 SDK 和 CLI 调用方式兼容。
 
@@ -66,7 +66,7 @@ MemShellParty(
 
 ## 重试策略
 
-内部 session 使用 `urllib3.util.Retry`，并通过现有 `requests_session(max_retries=...)` 传给 HTTP/HTTPS adapter。
+内部 session 使用 `urllib3.util.Retry`，并通过现有 `requests_session(max_retries=...)` 传给 HTTP/HTTPS adapter。构造时优先使用 urllib3 新版的 `allowed_methods` / `other` 参数；旧版 urllib3 回退到 `method_whitelist`，保持项目现有依赖环境兼容。
 
 策略约束：
 
@@ -105,7 +105,7 @@ _request(method: str, path: str, **kwargs: Any) -> Any
 1. 使用 `_url(path)` 生成完整 URL。
 2. 调用 `self.req.request(method, url, ...)`。
 3. 捕获 `requests.exceptions.RequestException`。
-4. 抛出 `MemShellPartyError`，并使用 `raise ... from exc` 保留原异常。
+4. 抛出 `MemShellPartyError`，并抑制原异常链，避免 traceback 暴露敏感信息。
 5. 成功获得响应后继续由 `_parse_response()` 处理 HTTP 状态和 JSON body；若响应为 `httputil.EnhancedResponse`，显式调用 `requests.Response.json()`，避免增强响应在解析失败时打印完整响应正文。
 
 网络错误信息格式应包含：
@@ -123,7 +123,7 @@ _request(method: str, path: str, **kwargs: Any) -> Any
 - `password`、`key`、`behinderPass`、`godzillaPass`、`godzillaKey`、`antSwordPass`。
 - `shellClassBase64` 或生成结果。
 
-现有 `MemShellPartyError.status_code` 和 `body` 属性保持兼容。SDK 产生的网络、HTTP 和响应解析错误均使用 `body=None`，避免异常对象或日志保留响应载荷；HTTP 和解析错误仍保留 `status_code`。原始 `requests` 或 JSON 解析异常通过 `exception.__cause__` 获取，不新增重复的公开 cause 属性。
+现有 `MemShellPartyError.status_code` 和 `body` 属性保持兼容。SDK 产生的网络、HTTP 和响应解析错误均使用 `body=None`，避免异常对象或日志保留响应载荷；HTTP 和解析错误仍保留 `status_code`。网络和 JSON 解析错误会抑制原始异常链，避免异常 traceback 或日志采集器重新暴露敏感内容。
 
 ## 外部 Session 行为
 
@@ -154,7 +154,7 @@ CLI 仍返回退出码 `1`，不改变 stdout 的成功结果格式。
 2. `connect_retries=0` 可禁用重试。
 3. 非法重试次数和退避参数被拒绝。
 4. 外部 session 的 adapter、代理和 `trust_env` 不被修改。
-5. GET 网络异常被包装成 `MemShellPartyError`，并保留 `__cause__`。
+5. GET 网络异常被包装成 `MemShellPartyError`，且 traceback 不保留原始异常链。
 6. POST 网络异常被包装，错误文本不包含请求体和凭证。
 7. HTTP 错误、JSON 错误和响应 `error` 字段只公开固定类别与状态码，不保留响应载荷；真实 `EnhancedResponse` 的非法 JSON 路径不得向 stdout/stderr 打印响应正文。
 8. CLI 对包装后的网络错误输出单行错误并返回 `1`，不打印 traceback。
@@ -203,7 +203,7 @@ CLI 仍返回退出码 `1`，不改变 stdout 的成功结果格式。
 
 1. 默认调用在连接阶段瞬时失败时最多重试 2 次。
 2. POST 不发生读取错误或状态码重试。
-3. 最终网络失败统一表现为 `MemShellPartyError`，原始异常链可检查。
+3. 最终网络失败统一表现为 `MemShellPartyError`，且原始异常链不出现在 traceback 中。
 4. 错误输出不包含凭证或请求体。
 5. 外部 session 配置不被修改。
 6. 相关单元测试和现有测试通过。

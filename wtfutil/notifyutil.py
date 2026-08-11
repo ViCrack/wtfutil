@@ -5,6 +5,7 @@ import base64
 import hashlib
 import hmac
 import json
+import logging
 import os
 import re
 import smtplib
@@ -15,9 +16,8 @@ from email.header import Header
 from email.mime.text import MIMEText
 from email.utils import formataddr
 
-import logging
 from .configutil import ensure_section
-from .httputil import requests_session, RequestsSession
+from .httputil import RequestsSession, requests_session
 
 logger = logging.getLogger(__name__)
 

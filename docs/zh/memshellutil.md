@@ -323,7 +323,7 @@ except MemShellPartyError as e:
     print(e, e.status_code)
 ```
 
-常见原因：组合不合法、服务不可达、响应非 JSON、超时。HTTP 错误、非 JSON 响应和响应中的 `error` 字段只公开固定错误类别与状态码，不包含服务端原文或响应载荷；JSON 解析异常可通过 `e.__cause__` 检查。网络层 `requests` 异常统一包装为 `MemShellPartyError`，原异常同样可通过 `e.__cause__` 检查。内部 session 默认仅重试连接阶段失败 2 次；不重试读取超时、HTTP 状态错误或响应解析错误。外部传入的 session 保留调用方自己的重试策略。
+常见原因：组合不合法、服务不可达、响应非 JSON、超时。HTTP 错误、非 JSON 响应和响应中的 `error` 字段只公开固定错误类别与状态码，不包含服务端原文或响应载荷。网络层 `requests` 异常统一包装为 `MemShellPartyError`；包装器会主动抑制原始异常上下文，避免 traceback 泄露凭证、请求体、代理详情或响应载荷。内部 session 默认仅重试连接阶段失败 2 次；不重试读取超时、HTTP 状态错误或响应解析错误。外部传入的 session 保留调用方自己的重试策略。内部重试策略同时兼容新旧 urllib3 的构造参数名称。
 
 ---
 

@@ -7,9 +7,10 @@ import uuid
 from abc import ABC, abstractmethod
 from contextlib import closing
 from functools import wraps
-from typing import List, Dict, Union, Optional, Any
+from typing import Any, Dict, List, Optional, Union
 
-from pymysql import connect as pymysql_connect, cursors
+from pymysql import connect as pymysql_connect
+from pymysql import cursors
 
 logger = logging.getLogger(__name__)
 

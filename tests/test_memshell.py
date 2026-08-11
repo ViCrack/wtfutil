@@ -10,6 +10,7 @@ import io
 import json
 import os
 import tempfile
+import traceback
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -22,6 +23,7 @@ from wtfutil.memshellutil import (
     DEFAULT_BASE_URL,
     MemShellParty,
     MemShellPartyError,
+    _build_connect_retry,
     build_generate_body,
     extract_generate_meta,
     resolve_shell_credentials,
@@ -162,11 +164,13 @@ class TestBuildGenerateBody(unittest.TestCase):
         self.assertEqual(body["shellToolConfig"]["behinderPass"], "")
 
     def test_invalid_jre_raises_without_echoing_input(self):
+        sensitive_jre = "example-sensitive-jre"
         with self.assertRaises(ValueError) as ctx:
-            build_generate_body(jre="example-sensitive-jre")
+            build_generate_body(jre=sensitive_jre)
 
         self.assertEqual(str(ctx.exception), "invalid jre / target_jre_version")
-        self.assertNotIn("example-sensitive", str(ctx.exception))
+        traceback_text = "".join(traceback.format_exception(ctx.exception))
+        self.assertNotIn("example-sensitive", traceback_text)
 
     def test_command_defaults(self):
         body = build_generate_body(shell_tool="Command")
@@ -323,6 +327,26 @@ class TestMemShellPartyClient(unittest.TestCase):
         self.assertEqual(retry.connect, 0)
         client.close()
 
+    @mock.patch("wtfutil.memshellutil.Retry")
+    def test_retry_builder_supports_urllib3_legacy_arguments(self, retry_class):
+        legacy_retry = object()
+        retry_class.side_effect = [TypeError("legacy signature"), legacy_retry]
+
+        result = _build_connect_retry(2, 0.25)
+
+        self.assertIs(result, legacy_retry)
+        self.assertEqual(retry_class.call_count, 2)
+        modern_arguments = retry_class.call_args_list[0].kwargs
+        self.assertEqual(modern_arguments["other"], 0)
+        self.assertEqual(
+            modern_arguments["allowed_methods"], frozenset({"GET", "POST"})
+        )
+        legacy_arguments = retry_class.call_args_list[1].kwargs
+        self.assertEqual(
+            legacy_arguments["method_whitelist"], frozenset({"GET", "POST"})
+        )
+        self.assertNotIn("other", legacy_arguments)
+
     def test_retry_options_reject_invalid_values(self):
         for value in (-1, True, 1.5, "2"):
             with self.subTest(connect_retries=value), self.assertRaises(
@@ -335,6 +359,12 @@ class TestMemShellPartyClient(unittest.TestCase):
                 (TypeError, ValueError)
             ):
                 MemShellParty(retry_backoff=value)
+
+        sensitive_retry_backoff = "example-sensitive-backoff"
+        with self.assertRaises(TypeError) as context:
+            MemShellParty(retry_backoff=sensitive_retry_backoff)
+        traceback_text = "".join(traceback.format_exception(context.exception))
+        self.assertNotIn("example-sensitive-backoff", traceback_text)
 
     @mock.patch("wtfutil.memshellutil.requests_session")
     def test_external_session_retry_configuration_is_untouched(self, session_factory):
@@ -395,7 +425,7 @@ class TestMemShellPartyClient(unittest.TestCase):
         self.assertEqual(kwargs["json"]["shellToolConfig"]["behinderPass"], "example-pass")
         client.close()
 
-    def test_transport_error_is_wrapped_and_preserves_cause(self):
+    def test_transport_error_is_wrapped_without_exposing_original_exception(self):
         session = mock.Mock()
         cause = RequestsConnectionError(OSError(101, "example-sensitive-detail"))
         session.request.side_effect = cause
@@ -404,13 +434,43 @@ class TestMemShellPartyClient(unittest.TestCase):
         with self.assertRaises(MemShellPartyError) as ctx:
             client.get_config()
 
-        self.assertIs(ctx.exception.__cause__, cause)
+        self.assertIsNone(ctx.exception.__cause__)
+        self.assertIsNone(ctx.exception.__context__)
         self.assertIsNone(ctx.exception.status_code)
         self.assertIsNone(ctx.exception.body)
         self.assertIn("GET https://example.test/api/config", str(ctx.exception))
         self.assertIn("ConnectionError", str(ctx.exception))
         self.assertIn("[Errno 101]", str(ctx.exception))
         self.assertNotIn("example-sensitive-detail", str(ctx.exception))
+        client.close()
+
+    def test_transport_error_traceback_does_not_include_sensitive_details(self):
+        session = mock.Mock()
+        session.request.side_effect = RequestsConnectionError(
+            "proxy https://proxy-user:proxy-pass@proxy.example unavailable"
+        )
+        client = MemShellParty(
+            base_url="https://api-user:api-pass@example.test",
+            session=session,
+        )
+
+        with self.assertRaises(MemShellPartyError) as context:
+            client.generate(
+                shell_tool="Behinder",
+                behinder_pass="example-pass",
+                shell_class_base64="example-class-data",
+            )
+
+        traceback_text = "".join(traceback.format_exception(context.exception))
+        for secret in (
+            "api-user",
+            "api-pass",
+            "proxy-user",
+            "proxy-pass",
+            "example-pass",
+            "example-class-data",
+        ):
+            self.assertNotIn(secret, traceback_text)
         client.close()
 
     def test_transport_error_redacts_credentials_and_request_body(self):
@@ -453,7 +513,8 @@ class TestMemShellPartyClient(unittest.TestCase):
         with self.assertRaises(MemShellPartyError) as ctx:
             client.get_config()
 
-        self.assertIs(ctx.exception.__cause__, cause)
+        self.assertIsNone(ctx.exception.__cause__)
+        self.assertIsNone(ctx.exception.__context__)
         self.assertIn("GET /api/config", str(ctx.exception))
         self.assertNotIn("example-invalid", str(ctx.exception))
         self.assertNotIn("example-sensitive-detail", str(ctx.exception))
@@ -507,7 +568,8 @@ class TestMemShellPartyClient(unittest.TestCase):
         self.assertEqual(str(ctx.exception), "invalid JSON response (HTTP 502)")
         self.assertEqual(ctx.exception.status_code, 502)
         self.assertIsNone(ctx.exception.body)
-        self.assertNotIn("example-sensitive", str(ctx.exception))
+        traceback_text = "".join(traceback.format_exception(ctx.exception))
+        self.assertNotIn("example-sensitive", traceback_text)
         response.json.assert_called_once_with()
         client.close()
 
