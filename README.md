@@ -21,6 +21,14 @@ Requires Python 3.10+.
 
 ---
 
+## Responsible Use
+
+Security-sensitive features in this project are intended only for authorized security testing, research, education, and administration of systems you own or have explicit permission to assess.
+
+Do not use this software to access, disrupt, modify, or deploy code to systems without authorization. Users are solely responsible for complying with applicable laws, regulations, organizational policies, and third-party terms of service. The maintainers do not endorse or accept responsibility for unlawful or abusive use.
+
+---
+
 ## ⚠️ 1.3.0 Breaking Migration: Import from Submodules
 
 > [!IMPORTANT]
