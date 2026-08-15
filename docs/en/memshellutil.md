@@ -13,20 +13,18 @@ Guide for **Python SDK callers**: call the [MemShellParty](https://github.com/Re
 ## Quick start
 
 ```python
-from wtfutil.memshellutil import MemShellParty, MemShellPartyError
+from wtfutil.memshellutil import MemShellParty, MemShellPartyError, ShellTool, ShellType
 
 with MemShellParty() as client:
     result = client.generate(
-        shell_tool="behinder",   # case-insensitive
-        shell_type="listener",
+        shell_tool=ShellTool.BEHINDER,
+        shell_type=ShellType.LISTENER,
         jre=9,                   # Java/JRE release; ≥9 auto byPassJavaModule=True
         password="example-pass",         # convenience password → behinderPass
         header_value="example-token",    # header gate (default header_name=User-Agent)
     )
-    payload = result["packResult"]           # packed deliverable string
-    info = result["memShellResult"]          # class names, sizes, connect params
-    print(payload[:80], "...")
-    print(info["shellClassName"], info["injectorClassName"])
+    print(result.pack_result[:80], "...")
+    print(result.shell_class_name, result.injector_class_name)
 ```
 
 Import SDK APIs from their owning public submodule:
@@ -87,8 +85,8 @@ Constructor args:
 | `get_config()` | Valid `server → shellTool → shellType` tree |
 | `get_packers_tree()` | Available packer tree |
 | `get_command_configs()` | Command tool encryptors / implementations |
-| `generate(body=None, **kwargs)` | Generate + pack; returns full JSON |
-| `generate_probe(body=None, **kwargs)` | Generate a probe shell + pack; returns full JSON |
+| `generate(body=None, **kwargs)` | Generate + pack; returns `MemShellGenerateResult` |
+| `generate_probe(body=None, **kwargs)` | Generate a probe shell + pack; returns `ProbeGenerateResult` |
 
 `generate(probe=True)` is only the memory-shell **echo-probe flag** (wrap the injector in an echo shell for remote verify). `generate_probe` calls a separate `POST /api/probe/generate` API and produces a probe shell, not the same artifact.
 
@@ -118,7 +116,7 @@ Invalid combos fail on the server; the SDK raises `MemShellPartyError`.
 
 `body` must be a JSON-style object. Its `shellConfig`, `shellToolConfig`, and `injectorConfig` fields must also be objects; invalid nested types raise `TypeError` locally before any generate request is sent. `extract_generate_meta()` applies the same object validation to the corresponding response fields.
 
-**Case**: `server` / `shell_tool` / `shell_type` are **case-insensitive** within the known official names (`tomcat` → `Tomcat`, `GODZILLA` → `Godzilla`). Unknown names are sent as-is. The known list may lag upstream; check with `get_config()` / `memshell config`.
+**Case**: `server` / `shell_tool` / `shell_type` accept `Server` / `ShellTool` / `ShellType` enums, or **case-insensitive** strings within the known official names (`tomcat` → `Tomcat`, `GODZILLA` → `Godzilla`). Unknown names are sent as-is. The known list may lag upstream; check with `get_config()` / `memshell config`.
 
 ### Built-in defaults (aligned with the official UI)
 
@@ -144,7 +142,7 @@ For `shell_tool="Command"` when unset: `encryptor="RAW"`, `implementation_class=
 | `password="example-pass"` | Mapped by `shell_tool` to Behinder / Godzilla / AntSword `*Pass` |
 | `key="example-key"` | Written as Godzilla `godzillaKey` (usually irrelevant for other tools) |
 | `behinder_pass` / `godzilla_pass` / `godzilla_key` / `ant_sword_pass` | Advanced: specific fields win over `password` / `key` (prefer convenience fields day-to-day) |
-| Empty password fields | Server generates random values; returned in `memShellResult.shellToolConfig` |
+| Empty password fields | Server generates random values; returned in `result.shell_tool_config` |
 | `header_name` + `header_value` | Request must match this header before shell logic runs; set `header_value` yourself in practice |
 
 ```python
@@ -209,22 +207,22 @@ For JDK 9+ runtimes, pass `jre=9` (or higher) so module bypass turns on automati
 
 ## Using the response
 
-On success, `generate` returns a **dict** (full server JSON). Common keys:
+On success, `generate` returns a **`MemShellGenerateResult`**. Use attributes, not JSON keys:
 
-| Key | Use |
-|-----|-----|
-| `packResult` | Main packed string for the chosen `packer`; usually all you need |
-| `allPackResults` | Multi-format payloads when the server provides them |
-| `memShellResult` | Metadata: class names, sizes, final shell/injector/tool configs |
+| Attribute | Use |
+|-----------|-----|
+| `pack_result` | Main packed string for the chosen `packer`; usually all you need |
+| `all_pack_results` | Multi-format payloads when the server provides them |
+| `shell_class_name` / `injector_class_name` | Class names |
+| `shell_size` / `injector_size` | Sizes |
+| `shell_config` / `shell_tool_config` / `injector_config` | Final configs (payload fields stripped) |
 
 ```python
 result = client.generate(...)
-payload = result["packResult"]
-
-mem = result["memShellResult"]
-print(mem["shellClassName"], mem["injectorClassName"])
-print(mem["shellSize"], mem["injectorSize"])
-print(mem["shellToolConfig"])  # includes server-generated connection credentials when left empty
+payload = result.pack_result
+print(result.shell_class_name, result.injector_class_name)
+print(result.shell_size, result.injector_size)
+print(result.shell_tool_config)  # includes server-generated connection credentials when left empty
 ```
 
 For compact metadata without a large `packResult`:
@@ -240,22 +238,21 @@ meta = extract_generate_meta(result)
 
 ## generate_probe: probe shells
 
-`generate_probe` calls `POST /api/probe/generate`. Defaults match the official probe page: `method=ResponseBody`, `content=Command`, `shrink=True`, `static_initialize=True`, `seconds=5`, `server=Tomcat`, `sleep_server=Tomcat`. `jre` conversion matches `generate` (default 6; class ≥53 auto-sets `byPassJavaModule=True`).
+`generate_probe` calls `POST /api/probe/generate` and returns a `ProbeGenerateResult` (`pack_result`, `shell_class_name`, `shell_size`, `probe_config`, …). Defaults match the official probe page: `method=ResponseBody`, `content=Command`, `shrink=True`, `static_initialize=True`, `seconds=5`, `server=Tomcat`, `sleep_server=Tomcat`. `jre` conversion matches `generate` (default 6; class ≥53 auto-sets `byPassJavaModule=True`). A successful response that is not a JSON object raises a fixed `MemShellPartyError`.
 
-`method` / `content` are case-insensitive within known names. The SDK does **not** validate pairings; illegal combos come back as `MemShellPartyError`. Empty `host` / `req_param_name` / `command_template` are omitted from JSON.
+`method` / `content` / `server` / `sleep_server` accept enums (`ProbeMethod`, `ProbeContent`, `Server`) or strings; known names are case-insensitive. The SDK does **not** validate pairings; illegal combos come back as `MemShellPartyError`. Empty `host` / `req_param_name` / `command_template` are omitted from JSON.
 
 ```python
-from wtfutil.memshellutil import MemShellParty, extract_probe_meta
+from wtfutil.memshellutil import MemShellParty, ProbeContent, ProbeMethod, extract_probe_meta
 
 with MemShellParty() as client:
     result = client.generate_probe(
-        method="ResponseBody",
-        content="Command",
+        method=ProbeMethod.RESPONSE_BODY,
+        content=ProbeContent.COMMAND,
         jre=9,
     )
-    payload = result["packResult"]
-    info = result["probeShellResult"]
-    print(info["shellClassName"], info["shellSize"])
+    print(result.shell_class_name, result.shell_size)
+    payload = result.pack_result
     meta = extract_probe_meta(result)
 ```
 
@@ -288,7 +285,7 @@ with MemShellParty() as client:
         header_value="example-token",
         packer="DefaultBase64",
     )
-    open("payload.txt", "w", encoding="utf-8").write(r["packResult"])
+    open("payload.txt", "w", encoding="utf-8").write(r.pack_result)
 ```
 
 ### Command tool
@@ -369,6 +366,7 @@ Typical causes include an illegal combination, unreachable host, non-JSON respon
 |--------|--------|
 | `DEFAULT_BASE_URL` | Default service root constant |
 | `JRE_RELEASE_TO_CLASS` | JRE release → class major map (rarely needed directly) |
+| `Server` / `ShellTool` / `ShellType` / `ProbeMethod` / `ProbeContent` | SDK parameter enums (strings still accepted) |
 | `KNOWN_SERVERS` / `KNOWN_SHELL_TOOLS` / `KNOWN_SHELL_TYPES` | Known names for case folding |
 | `canonicalize_server` / `canonicalize_shell_tool` / `canonicalize_shell_type` | Standalone normalizers |
 | `memshell_config` | Runtime config dict (`BASE_URL`) |
@@ -377,7 +375,9 @@ Typical causes include an illegal combination, unreachable host, non-JSON respon
 | `resolve_jre_class_version(...)` | Normalize release or class major to API number |
 | `resolve_shell_credentials(...)` | Map `password`/`key` to tool-specific fields |
 | `extract_generate_meta(result, output=...)` | Compact meta from a generate response |
-| `extract_probe_meta(result, output=...)` | Compact meta from a generate_probe response |
+| `MemShellGenerateResult` | Object returned by `generate` (`pack_result` / `shell_class_name` / …); `to_dict()` is the camelCase subset |
+| `ProbeGenerateResult` | Object returned by `generate_probe` (`pack_result` / `shell_class_name` / …); `to_dict()` is the camelCase subset |
+| `extract_probe_meta(result, output=...)` | Compact meta from a probe response; config fields are allowlisted and redacted |
 | `MemShellPartyError` | API / protocol errors |
 
 ---
@@ -400,9 +400,10 @@ memshell install-skill --project
 `memshell probe` generates a probe shell (`POST /api/probe/generate`). `generate --probe` remains the memory-shell echo-probe flag, not the same subcommand.
 
 - **`-o PATH`**: write only `packResult` to the file; stdout is meta JSON.
-- **Without `-o`**: stdout is the full response JSON.
-- **`--jre`**: target Java release (6/8/9/11/17/21).
-- **`--server` / `--shell-tool` / `--shell-type`**: case-insensitive for known names.
+- **Without `-o`**: stdout is the `to_dict()` JSON (includes `packResult`, not class-byte payloads).
+- **`--jre`**: target Java release (6/8/9/11/17/21/22).
+- **`--server` / `--shell-tool` / `--shell-type` / `--method` / `--content` / `--sleep-server`**: case-insensitive for known names.
+- **`--seconds`**: invalid values print a single-line `error: ...` and exit 1.
 - Prefer `--password` / `--key`; dedicated `*-pass` and `--target-jre-version` still work but are hidden from `--help`.
 
 Flags mirror the kwargs tables above; see `memshell generate --help` / `memshell probe --help`.

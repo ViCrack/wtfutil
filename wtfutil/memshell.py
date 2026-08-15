@@ -21,8 +21,10 @@ from importlib import resources
 from pathlib import Path
 
 from .memshellutil import (
+    MemShellGenerateResult,
     MemShellParty,
     MemShellPartyError,
+    ProbeGenerateResult,
     extract_generate_meta,
     extract_probe_meta,
 )
@@ -60,7 +62,7 @@ _GENERATE_EPILOG = """
 """
 
 _PROBE_EPILOG = """
-常用参数（method / content 在已知名称内不区分大小写）：
+常用参数（method / content / server / sleep-server 在已知名称内不区分大小写）：
 
   --method / --content   探测方法与内容（默认 ResponseBody / Command）
   --jre                  目标 Java 发行版本：6/8/9/11/17/21/22（默认 6；JDK9+ 用 ≥9）
@@ -82,6 +84,8 @@ _PROBE_EPILOG = """
 
 
 def _print_json(data: object) -> None:
+    if isinstance(data, (MemShellGenerateResult, ProbeGenerateResult)):
+        data = data.to_dict()
     print(json.dumps(data, ensure_ascii=False, indent=2))
 
 
@@ -183,10 +187,12 @@ def _cmd_generate(args: argparse.Namespace) -> int:
     client = _client_from_args(args)
     try:
         result = client.generate(body_override, **gen_kwargs)
+        if not isinstance(result, MemShellGenerateResult):
+            raise MemShellPartyError("invalid JSON response")
+        pack = result.pack_result
+        all_packs = result.all_pack_results
 
         if args.output:
-            pack = result.get("packResult")
-            all_packs = result.get("allPackResults")
             if pack:
                 Path(args.output).write_text(str(pack), encoding="utf-8")
             elif all_packs:
@@ -207,6 +213,10 @@ def _cmd_generate(args: argparse.Namespace) -> int:
 
 def _cmd_probe(args: argparse.Namespace) -> int:
     """调用 generate_probe；-o 时只写 packResult，stdout 输出 meta。"""
+    try:
+        seconds = int(args.seconds)
+    except (TypeError, ValueError):
+        raise ValueError("seconds must be an integer") from None
     kwargs = {
         "method": args.method,
         "content": args.content,
@@ -218,7 +228,7 @@ def _cmd_probe(args: argparse.Namespace) -> int:
         "static_initialize": not args.no_static_initialize,
         "shell_class_name": args.shell_class_name,
         "host": args.host,
-        "seconds": args.seconds,
+        "seconds": seconds,
         "sleep_server": args.sleep_server,
         "server": args.server,
         "req_param_name": args.req_param_name,
@@ -230,10 +240,12 @@ def _cmd_probe(args: argparse.Namespace) -> int:
     client = _client_from_args(args)
     try:
         result = client.generate_probe(**kwargs)
+        if not isinstance(result, ProbeGenerateResult):
+            raise MemShellPartyError("invalid JSON response")
+        pack = result.pack_result
+        all_packs = result.all_pack_results
 
         if args.output:
-            pack = result.get("packResult")
-            all_packs = result.get("allPackResults")
             if pack:
                 Path(args.output).write_text(str(pack), encoding="utf-8")
             elif all_packs:
@@ -533,19 +545,18 @@ def main(argv: list[str] | None = None) -> int:
     )
     p_probe.add_argument(
         "--seconds",
-        type=int,
-        default=5,
+        default="5",
         help="Sleep 探测等待秒数（默认 5）",
     )
     p_probe.add_argument(
         "--sleep-server",
         default="Tomcat",
-        help="Sleep 探测对应的中间件（默认 Tomcat）",
+        help="Sleep 探测对应的中间件（不区分大小写；默认 Tomcat）",
     )
     p_probe.add_argument(
         "--server",
         default="Tomcat",
-        help="探测内容对应的中间件（默认 Tomcat）",
+        help="探测内容对应的中间件（不区分大小写；默认 Tomcat）",
     )
     p_probe.add_argument(
         "--req-param-name",

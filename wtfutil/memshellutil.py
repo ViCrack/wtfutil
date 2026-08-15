@@ -8,6 +8,9 @@ MemShellParty HTTP API 客户端：生成内存马 / 探测马 / 查询配置。
 from __future__ import annotations
 
 import math
+import re
+from dataclasses import dataclass, field
+from enum import Enum
 from typing import Any
 from urllib.parse import urlsplit
 
@@ -178,6 +181,23 @@ KNOWN_PROBE_CONTENTS = (
 )
 
 
+def _enum_member_name(value: str) -> str:
+    split = re.sub(r"([a-z0-9])([A-Z])", r"\1_\2", value)
+    split = re.sub(r"([A-Z]+)([A-Z][a-z])", r"\1_\2", split)
+    return split.upper()
+
+
+def _str_enum(name: str, values: tuple[str, ...]) -> type[Enum]:
+    return Enum(name, {_enum_member_name(item): item for item in values}, type=str)
+
+
+Server = _str_enum("Server", KNOWN_SERVERS)
+ShellTool = _str_enum("ShellTool", KNOWN_SHELL_TOOLS)
+ShellType = _str_enum("ShellType", KNOWN_SHELL_TYPES)
+ProbeMethod = _str_enum("ProbeMethod", KNOWN_PROBE_METHODS)
+ProbeContent = _str_enum("ProbeContent", KNOWN_PROBE_CONTENTS)
+
+
 def _casefold_lookup(names: tuple[str, ...]) -> dict[str, str]:
     return {n.casefold(): n for n in names}
 
@@ -246,36 +266,46 @@ def resolve_jre_class_version(value: int | str) -> int:
     return version_value
 
 
-def canonicalize_server(value: str) -> str:
+def canonicalize_server(value: str | Server) -> str:
     """将 server 归一为官方大小写；未知名称原样返回。"""
+    if isinstance(value, Enum):
+        value = value.value
     if value is None or value == "":
         return value
     return _SERVER_LOOKUP.get(str(value).casefold(), value)
 
 
-def canonicalize_shell_tool(value: str) -> str:
+def canonicalize_shell_tool(value: str | ShellTool) -> str:
     """将 shell_tool 归一为官方大小写；未知名称原样返回。"""
+    if isinstance(value, Enum):
+        value = value.value
     if value is None or value == "":
         return value
     return _SHELL_TOOL_LOOKUP.get(str(value).casefold(), value)
 
 
-def canonicalize_shell_type(value: str) -> str:
+def canonicalize_shell_type(value: str | ShellType) -> str:
     """将 shell_type 归一为官方大小写；未知名称原样返回。"""
+    if isinstance(value, Enum):
+        value = value.value
     if value is None or value == "":
         return value
     return _SHELL_TYPE_LOOKUP.get(str(value).casefold(), value)
 
 
-def canonicalize_probe_method(value: str) -> str:
+def canonicalize_probe_method(value: str | ProbeMethod) -> str:
     """将探测方法归一为官方大小写；未知名称 strip 后原样返回。"""
-    text = (value or "").strip()
+    if isinstance(value, Enum):
+        value = value.value
+    text = ("" if value is None else str(value)).strip()
     return _PROBE_METHOD_LOOKUP.get(text.casefold(), text)
 
 
-def canonicalize_probe_content(value: str) -> str:
+def canonicalize_probe_content(value: str | ProbeContent) -> str:
     """将探测内容归一为官方大小写；未知名称 strip 后原样返回。"""
-    text = (value or "").strip()
+    if isinstance(value, Enum):
+        value = value.value
+    text = ("" if value is None else str(value)).strip()
     return _PROBE_CONTENT_LOOKUP.get(text.casefold(), text)
 
 
@@ -362,10 +392,10 @@ def resolve_shell_credentials(
 def build_generate_body(
     body: dict | None = None,
     *,
-    server: str = "Tomcat",
+    server: str | Server = "Tomcat",
     server_version: str = "unknown",
-    shell_tool: str = "Behinder",
-    shell_type: str = "Listener",
+    shell_tool: str | ShellTool = "Behinder",
+    shell_type: str | ShellType = "Listener",
     jre: int | str | None = None,
     target_jre_version: int | str | None = None,
     debug: bool = False,
@@ -502,39 +532,101 @@ def build_generate_body(
     return built
 
 
-def extract_generate_meta(result: dict, *, output: str | None = None) -> dict:
+_PAYLOAD_FIELD_NAMES = frozenset(
+    {
+        "packResult",
+        "allPackResults",
+        "shellBytesBase64Str",
+        "shellClassBytes",
+        "helperClassBytes",
+        "shellClassBase64",
+        "injectorClassBytes",
+    }
+)
+
+
+def _is_payload_field(key: Any) -> bool:
+    if not isinstance(key, str):
+        return False
+    if key in _PAYLOAD_FIELD_NAMES:
+        return True
+    return key.endswith(("Bytes", "Base64", "Base64Str"))
+
+
+def _redact_payload_fields(value: Any) -> Any:
+    if isinstance(value, dict):
+        return {
+            k: _redact_payload_fields(v)
+            for k, v in value.items()
+            if not _is_payload_field(k)
+        }
+    if isinstance(value, list):
+        return [_redact_payload_fields(item) for item in value]
+    return value
+
+
+def _as_config_dict(value: Any) -> dict[str, Any]:
+    if isinstance(value, dict):
+        return _redact_payload_fields(value)
+    return {}
+
+
+@dataclass
+class MemShellGenerateResult:
+    """``generate`` 的结构化结果；属性为 snake_case，避免猜 JSON 字段名。"""
+
+    pack_result: Any = None
+    all_pack_results: Any = None
+    shell_class_name: Any = None
+    injector_class_name: Any = None
+    shell_size: Any = None
+    injector_size: Any = None
+    shell_config: dict[str, Any] = field(default_factory=dict)
+    shell_tool_config: dict[str, Any] = field(default_factory=dict)
+    injector_config: dict[str, Any] = field(default_factory=dict)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "packResult": self.pack_result,
+            "allPackResults": self.all_pack_results,
+            "memShellResult": {
+                "shellClassName": self.shell_class_name,
+                "injectorClassName": self.injector_class_name,
+                "shellSize": self.shell_size,
+                "injectorSize": self.injector_size,
+                "shellConfig": self.shell_config,
+                "shellToolConfig": self.shell_tool_config,
+                "injectorConfig": self.injector_config,
+            },
+        }
+
+
+def extract_generate_meta(
+    result: dict | MemShellGenerateResult, *, output: str | None = None
+) -> dict:
     """
     从 generate 响应提取紧凑元信息（类名、连接参数、尺寸等），不含大段 packResult。
 
-    供 CLI ``-o`` 模式向 stdout 打印，便于 AI/脚本解析。
+    配置对象会递归去掉载荷类字段。供 CLI ``-o`` 模式向 stdout 打印。
     """
+    if isinstance(result, MemShellGenerateResult):
+        return extract_generate_meta(result.to_dict(), output=output)
     if not isinstance(result, dict):
-        raise TypeError("result must be a dictionary")
+        raise TypeError("result must be a dictionary or MemShellGenerateResult")
     mem = result.get("memShellResult", {})
     if not isinstance(mem, dict):
         raise TypeError("result.memShellResult must be an object")
     injector_cfg = mem.get("injectorConfig", {})
     if not isinstance(injector_cfg, dict):
         raise TypeError("result.memShellResult.injectorConfig must be an object")
-    meta: dict[str, Any] = {
+    meta = {
         "shellClassName": mem.get("shellClassName"),
         "injectorClassName": mem.get("injectorClassName"),
         "shellSize": mem.get("shellSize"),
         "injectorSize": mem.get("injectorSize"),
-        "shellConfig": mem.get("shellConfig"),
-        "shellToolConfig": mem.get("shellToolConfig"),
-        "injectorConfig": {
-            k: v
-            for k, v in injector_cfg.items()
-            if k
-            not in (
-                "shellClassBytes",
-                "helperClassBytes",
-                "shellClassBase64",
-                "injectorClassBytes",
-            )
-            and not (isinstance(k, str) and k.endswith("Bytes"))
-        },
+        "shellConfig": _as_config_dict(mem.get("shellConfig")),
+        "shellToolConfig": _as_config_dict(mem.get("shellToolConfig")),
+        "injectorConfig": _redact_payload_fields(injector_cfg),
         "hasPackResult": bool(result.get("packResult")),
         "hasAllPackResults": bool(result.get("allPackResults")),
     }
@@ -546,8 +638,8 @@ def extract_generate_meta(result: dict, *, output: str | None = None) -> dict:
 def build_probe_body(
     body: dict | None = None,
     *,
-    method: str = "ResponseBody",
-    content: str = "Command",
+    method: str | ProbeMethod = "ResponseBody",
+    content: str | ProbeContent = "Command",
     packer: str = "DefaultBase64",
     jre: int | str | None = None,
     target_jre_version: int | str | None = None,
@@ -559,16 +651,17 @@ def build_probe_body(
     shell_class_name: str = "",
     host: str = "",
     seconds: int | None = 5,
-    sleep_server: str = "Tomcat",
-    server: str = "Tomcat",
+    sleep_server: str | Server = "Tomcat",
+    server: str | Server = "Tomcat",
     req_param_name: str = "",
     command_template: str = "",
 ) -> dict:
     """
     组装官方 POST /api/probe/generate 请求体（camelCase 字段）。
 
-    ``method`` / ``content`` 在已知集合内**不区分大小写**
-    （如 ``dnslog`` → ``DNSLog``，``scriptengine`` → ``ScriptEngine``）；未知名称 strip 后原样上传。
+    ``method`` / ``content`` / ``server`` / ``sleep_server`` 可传枚举或字符串；
+    已知集合内**不区分大小写**（如 ``dnslog`` → ``DNSLog``，``tomcat`` → ``Tomcat``）；
+    未知名称 strip 后原样上传。
     不校验 method 与 content 的前端合法组合，非法组合由服务端返回 HTTP 错误。
     目标字节码版本请优先传 ``jre``（Java 发行版：6/8/9/11/17/21/22）；
     ``target_jre_version`` 仍可用（发行版或 class 主版本均可，见 :func:`resolve_jre_class_version`）。
@@ -630,20 +723,74 @@ def build_probe_body(
         pc["probeMethod"] = canonicalize_probe_method(pc["probeMethod"])
     if "probeContent" in pc:
         pc["probeContent"] = canonicalize_probe_content(pc["probeContent"])
+    if pcc.get("server"):
+        pcc["server"] = canonicalize_server(pcc["server"])
+    if pcc.get("sleepServer"):
+        pcc["sleepServer"] = canonicalize_server(pcc["sleepServer"])
     built["probeContentConfig"] = {
         k: v for k, v in pcc.items() if v not in ("", None)
     }
     return built
 
 
-def extract_probe_meta(result: dict, *, output: str | None = None) -> dict:
+_PROBE_CONFIG_KEYS = (
+    "probeMethod",
+    "probeContent",
+    "shellClassName",
+    "targetJreVersion",
+    "debug",
+    "byPassJavaModule",
+    "shrink",
+    "staticInitialize",
+    "lambdaSuffix",
+)
+_PROBE_CONTENT_CONFIG_KEYS = (
+    "host",
+    "seconds",
+    "sleepServer",
+    "server",
+    "reqParamName",
+    "commandTemplate",
+)
+
+
+@dataclass
+class ProbeGenerateResult:
+    """``generate_probe`` 的结构化结果；属性为 snake_case，避免猜 JSON 字段名。"""
+
+    pack_result: Any = None
+    all_pack_results: Any = None
+    shell_class_name: Any = None
+    shell_size: Any = None
+    probe_config: dict[str, Any] = field(default_factory=dict)
+    probe_content_config: dict[str, Any] = field(default_factory=dict)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "packResult": self.pack_result,
+            "allPackResults": self.all_pack_results,
+            "probeShellResult": {
+                "shellClassName": self.shell_class_name,
+                "shellSize": self.shell_size,
+                "probeConfig": self.probe_config,
+                "probeContentConfig": self.probe_content_config,
+            },
+        }
+
+
+def extract_probe_meta(
+    result: dict | ProbeGenerateResult, *, output: str | None = None
+) -> dict:
     """
     从 generate_probe 响应提取紧凑元信息（类名、尺寸、探测配置），不含 packResult。
 
+    ``probeConfig`` / ``probeContentConfig`` 只保留字段白名单，并递归去掉载荷类字段。
     供 CLI ``-o`` 模式向 stdout 打印，便于 AI/脚本解析。
     """
+    if isinstance(result, ProbeGenerateResult):
+        return extract_probe_meta(result.to_dict(), output=output)
     if not isinstance(result, dict):
-        raise TypeError("result must be a dictionary")
+        raise TypeError("result must be a dictionary or ProbeGenerateResult")
     probe = result.get("probeShellResult", {})
     if not isinstance(probe, dict):
         raise TypeError("result.probeShellResult must be an object")
@@ -653,11 +800,15 @@ def extract_probe_meta(result: dict, *, output: str | None = None) -> dict:
     content_cfg = probe.get("probeContentConfig", {})
     if not isinstance(content_cfg, dict):
         raise TypeError("result.probeShellResult.probeContentConfig must be an object")
-    meta: dict[str, Any] = {
+    meta = {
         "shellClassName": probe.get("shellClassName"),
         "shellSize": probe.get("shellSize"),
-        "probeConfig": probe_cfg,
-        "probeContentConfig": content_cfg,
+        "probeConfig": _redact_payload_fields(
+            {k: probe_cfg[k] for k in _PROBE_CONFIG_KEYS if k in probe_cfg}
+        ),
+        "probeContentConfig": _redact_payload_fields(
+            {k: content_cfg[k] for k in _PROBE_CONTENT_CONFIG_KEYS if k in content_cfg}
+        ),
         "hasPackResult": bool(result.get("packResult")),
         "hasAllPackResults": bool(result.get("allPackResults")),
     }
@@ -860,13 +1011,14 @@ class MemShellParty:
         resp = self._request("GET", "/api/config/command/configs")
         return self._parse_response(resp)
 
-    def generate(self, body: dict | None = None, **kwargs: Any) -> dict:
+    def generate(self, body: dict | None = None, **kwargs: Any) -> MemShellGenerateResult:
         """
         POST /api/memshell/generate — 生成内存马并打包。
 
         参数与 :func:`build_generate_body` 相同（snake_case → 官方 camelCase）。
+        ``server`` / ``shell_tool`` / ``shell_type`` 可传枚举或字符串（已知名称不区分大小写）。
         可传完整 ``body``；与 kwargs 同时存在时 body 深度覆盖。
-        返回含 ``packResult`` / ``memShellResult`` 的完整响应；不做缓存。
+        返回 :class:`MemShellGenerateResult`；不做缓存。
         """
         req_body = build_generate_body(body, **kwargs)
         resp = self._request(
@@ -875,17 +1027,41 @@ class MemShellParty:
             json=req_body,
             headers={"Content-Type": "application/json", "Accept": "*/*"},
         )
-        return self._parse_response(resp)
+        data = self._parse_response(resp)
+        if not isinstance(data, dict):
+            raise MemShellPartyError(
+                f"invalid JSON response (HTTP {resp.status_code})",
+                status_code=resp.status_code,
+            )
+        try:
+            meta = extract_generate_meta(data)
+        except TypeError:
+            raise MemShellPartyError(
+                f"invalid JSON response (HTTP {resp.status_code})",
+                status_code=resp.status_code,
+            ) from None
+        return MemShellGenerateResult(
+            pack_result=data.get("packResult"),
+            all_pack_results=data.get("allPackResults"),
+            shell_class_name=meta["shellClassName"],
+            injector_class_name=meta["injectorClassName"],
+            shell_size=meta["shellSize"],
+            injector_size=meta["injectorSize"],
+            shell_config=meta["shellConfig"],
+            shell_tool_config=meta["shellToolConfig"],
+            injector_config=meta["injectorConfig"],
+        )
 
-    def generate_probe(self, body: dict | None = None, **kwargs: Any) -> dict:
+    def generate_probe(self, body: dict | None = None, **kwargs: Any) -> ProbeGenerateResult:
         """
         POST /api/probe/generate — 生成探测马并打包。
 
         与 ``generate(probe=True)`` 不是同一件事：后者只是内存马生成里的回显探测开关，
         本方法走独立的探测马接口。
         参数与 :func:`build_probe_body` 相同（snake_case → 官方 camelCase）。
+        ``method`` / ``content`` / ``server`` / ``sleep_server`` 可传枚举或字符串（已知名称不区分大小写）。
         可传完整 ``body``；与 kwargs 同时存在时 body 深度覆盖。
-        返回含 ``packResult`` / ``probeShellResult`` 的完整响应；不做缓存。
+        返回 :class:`ProbeGenerateResult`；不做缓存。
         """
         req_body = build_probe_body(body, **kwargs)
         resp = self._request(
@@ -894,7 +1070,27 @@ class MemShellParty:
             json=req_body,
             headers={"Content-Type": "application/json", "Accept": "*/*"},
         )
-        return self._parse_response(resp)
+        data = self._parse_response(resp)
+        if not isinstance(data, dict):
+            raise MemShellPartyError(
+                f"invalid JSON response (HTTP {resp.status_code})",
+                status_code=resp.status_code,
+            )
+        try:
+            meta = extract_probe_meta(data)
+        except TypeError:
+            raise MemShellPartyError(
+                f"invalid JSON response (HTTP {resp.status_code})",
+                status_code=resp.status_code,
+            ) from None
+        return ProbeGenerateResult(
+            pack_result=data.get("packResult"),
+            all_pack_results=data.get("allPackResults"),
+            shell_class_name=meta["shellClassName"],
+            shell_size=meta["shellSize"],
+            probe_config=meta["probeConfig"],
+            probe_content_config=meta["probeContentConfig"],
+        )
 
 
 __all__ = [
@@ -903,8 +1099,15 @@ __all__ = [
     "KNOWN_SERVERS",
     "KNOWN_SHELL_TOOLS",
     "KNOWN_SHELL_TYPES",
+    "MemShellGenerateResult",
     "MemShellParty",
     "MemShellPartyError",
+    "ProbeContent",
+    "ProbeGenerateResult",
+    "ProbeMethod",
+    "Server",
+    "ShellTool",
+    "ShellType",
     "build_generate_body",
     "build_probe_body",
     "canonicalize_server",

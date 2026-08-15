@@ -58,3 +58,4 @@ wtfconfig.ini
 
 # Local linked worktrees
 .worktrees/
+.agents/

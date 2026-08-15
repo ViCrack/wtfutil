@@ -39,7 +39,7 @@ memshell generate -o payload.txt \
 | `--server` | 目标中间件（Tomcat/Jetty/SpringWebMvc…；不区分大小写） |
 | `--shell-tool` | 工具类型（Behinder/Godzilla/Command…；不区分大小写） |
 | `--shell-type` | 挂载形态（Listener/Filter/Valve…；不区分大小写），须与 tool 匹配 |
-| `--jre` | 目标 Java/JRE 发行版本：6 / 8 / 9 / 11 / 17 / 21（默认 6；JDK9+ 用 ≥9） |
+| `--jre` | 目标 Java/JRE 发行版本：6 / 8 / 9 / 11 / 17 / 21 / 22（默认 6；JDK9+ 用 ≥9） |
 | `--by-pass-java-module` | 绕过 JDK9+ 模块（Unsafe defineClass）；JRE≥9 默认自动开 |
 | `--no-shrink` | 关闭缩小字节码（默认开 SKIP_DEBUG） |
 | `--debug` | 打印注入/异常调试信息 |
@@ -92,7 +92,7 @@ memshell probe -m ResponseBody -c Command -p DefaultBase64 -o probe.txt
 
 - **`-o`**：文件只有 `packResult`；不要把 payload 贴进对话。
 - **stdout**：meta JSON（类名、尺寸、`output` 路径等）。解析 stdout，不要回读 payload 文件内容到对话。
-- **`-m/--method` / `-c/--content`**：已知名称内不区分大小写。
+- **`-m/--method` / `-c/--content` / `--server` / `--sleep-server`**：已知名称内不区分大小写。
 
 最小：`memshell probe -o probe.txt`（ResponseBody+Command+JRE6+DefaultBase64）。
 
@@ -128,7 +128,7 @@ SDK/CLI 不校验组合；非法配对由服务端报错。
 | `--shell-class-name` | 空（服务端随机） | 指定探测马全限定类名 |
 | `--base-url` | https://party.mem.mk | 覆盖服务根；也可用 `MEMSHELL_BASE_URL` |
 | `--timeout` | 60 | HTTP 超时秒数 |
-| `-o/--output` | 无则 stdout 完整 JSON | **推荐**：文件只写 packResult |
+| `-o/--output` | 无则 stdout 为 `to_dict()` JSON（含 packResult，不含 class 字节） | **推荐**：文件只写 packResult |
 
 ### 示例
 
