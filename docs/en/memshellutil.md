@@ -342,7 +342,7 @@ Failures raise `MemShellPartyError`:
 
 | Attribute | Meaning |
 |-----------|---------|
-| `str(e)` / `args` | Fixed error category and HTTP status; network errors also include a sanitized target, exception type, and errno summary |
+| `str(e)` / `args` | Server `error` string (max 500 chars) plus HTTP status when present; otherwise a fixed category. Network errors also include a sanitized target, exception type, and errno summary |
 | `e.status_code` | HTTP status (may be `None`) |
 | `e.body` | Compatibility attribute; SDK-generated errors leave it as `None` and do not retain the raw response |
 
@@ -356,7 +356,7 @@ except MemShellPartyError as e:
     print(e, e.status_code)
 ```
 
-Typical causes include an illegal combination, unreachable host, non-JSON response, or timeout. HTTP errors, non-JSON responses, and response `error` fields expose only a fixed error category and status code, never the server text or response payload. Transport-level `requests` exceptions are also wrapped in `MemShellPartyError`; the wrapper deliberately suppresses the original exception context so tracebacks cannot expose credentials, request bodies, proxy details, or response payloads. Internally owned sessions retry connection-establishment failures twice by default. Read timeouts, HTTP status failures, and response parsing failures are not retried. Externally supplied sessions keep the caller's retry policy. The internal retry policy supports both modern and legacy urllib3 constructor names.
+Typical causes include an illegal combination, unreachable host, non-JSON response, or timeout. A response `error` string is copied into `str(e)` (for example `Unsupported server type: 'SpringWebFlux1'. (HTTP 400)`) so callers can fix arguments; `packResult`, request bodies, and credentials stay out of the exception. Non-JSON responses or errors without an `error` field still use a fixed category and status only. Transport-level `requests` exceptions are also wrapped in `MemShellPartyError`; the wrapper deliberately suppresses the original exception context so tracebacks cannot expose credentials, request bodies, proxy details, or response payloads. Internally owned sessions retry connection-establishment failures twice by default. Read timeouts, HTTP status failures, and response parsing failures are not retried. Externally supplied sessions keep the caller's retry policy. The internal retry policy supports both modern and legacy urllib3 constructor names.
 
 ---
 

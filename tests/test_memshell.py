@@ -833,31 +833,33 @@ class TestMemShellPartyClient(unittest.TestCase):
         self.assertEqual(error_output.getvalue(), "")
         client.close()
 
-    def test_http_error_redacts_response_body_and_server_message(self):
+    def test_http_error_includes_error_field_but_not_payload(self):
         session = mock.Mock()
         session.request.return_value = _fake_resp(
             {
-                "error": "example-sensitive-server-detail",
+                "error": "Unsupported server type: 'SpringWebFlux1'.",
                 "packResult": "example-generated-payload",
             },
-            status_code=500,
+            status_code=400,
         )
         client = MemShellParty(base_url="https://example.test", session=session)
 
         with self.assertRaises(MemShellPartyError) as ctx:
             client.get_config()
 
-        self.assertEqual(str(ctx.exception), "HTTP 500")
-        self.assertEqual(ctx.exception.status_code, 500)
+        self.assertEqual(
+            str(ctx.exception),
+            "Unsupported server type: 'SpringWebFlux1'. (HTTP 400)",
+        )
+        self.assertEqual(ctx.exception.status_code, 400)
         self.assertIsNone(ctx.exception.body)
-        self.assertNotIn("example-sensitive", str(ctx.exception))
         self.assertNotIn("example-generated-payload", str(ctx.exception))
         client.close()
 
-    def test_body_error_field_redacts_server_message(self):
+    def test_body_error_field_includes_server_message(self):
         session = mock.Mock()
         session.request.return_value = _fake_resp(
-            {"error": "example-sensitive-server-detail"},
+            {"error": "unknown shell tool Godzilla1"},
             status_code=200,
         )
         client = MemShellParty(base_url="https://example.test", session=session)
@@ -865,10 +867,9 @@ class TestMemShellPartyClient(unittest.TestCase):
         with self.assertRaises(MemShellPartyError) as ctx:
             client.generate()
 
-        self.assertEqual(str(ctx.exception), "API response reported an error (HTTP 200)")
+        self.assertEqual(str(ctx.exception), "unknown shell tool Godzilla1 (HTTP 200)")
         self.assertEqual(ctx.exception.status_code, 200)
         self.assertIsNone(ctx.exception.body)
-        self.assertNotIn("example-sensitive", str(ctx.exception))
         client.close()
 
     def test_generate_probe_posts_json(self):
@@ -898,7 +899,7 @@ class TestMemShellPartyClient(unittest.TestCase):
         with self.assertRaises(MemShellPartyError) as ctx:
             client.generate_probe()
         self.assertIsNone(ctx.exception.body)
-        self.assertNotIn("example-server-secret", str(ctx.exception))
+        self.assertEqual(str(ctx.exception), "example-server-secret (HTTP 400)")
         client.close()
 
     def test_generate_probe_rejects_non_object_response(self):

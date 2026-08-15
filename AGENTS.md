@@ -101,7 +101,7 @@ session = httputil.requests_session()
   - 默认 `https://party.mem.mk`；`[memshell] BASE_URL` / env `MEMSHELL_BASE_URL`（经 `configutil`）；默认 `shellTool=Behinder`；**无内置缓存**（调用方自行缓存）。
   - 目标运行时用 `jre=` / CLI `--jre`（6/8/9/11/17/21/22，后续版本按标准映射）；兼容 `target_jre_version`。
   - `server` / `shell_tool` / `shell_type` / `method` / `content` 可用 `Server` / `ShellTool` / `ShellType` / `ProbeMethod` / `ProbeContent` 枚举，已知名称内忽略大小写。
-  - 内部 session 默认仅对连接阶段失败重试 2 次；网络异常统一包装为 `MemShellPartyError`，不得在错误信息或日志中输出请求体、响应载荷、凭证或生成载荷；外部 session 的重试策略不被修改。
+  - 内部 session 默认仅对连接阶段失败重试 2 次；网络异常统一包装为 `MemShellPartyError`。异常可带上服务端 `error` 字符串，但不得输出请求体、`packResult`、凭证或其它生成载荷；外部 session 的重试策略不被修改。
   - 通用凭证：`password` / `key`（或 CLI `--password` / `--key`）按 `shellTool` 映射到 `behinderPass` / `godzillaPass`+`godzillaKey` / `antSwordPass`。
   - 文档：`docs/en/memshellutil.md`、`docs/zh/memshellutil.md`；测试：`tests/test_memshell.py`（含可选 live 联调）。
 

@@ -953,7 +953,7 @@ class MemShellParty:
         raise MemShellPartyError(request_error_message)
 
     def _parse_response(self, resp: Any) -> Any:
-        """解析 JSON；错误仅公开固定类别和 HTTP 状态码。"""
+        """解析 JSON。API 的 ``error`` 字符串会带进异常；不附带响应体或载荷。"""
         try:
             if isinstance(resp, EnhancedResponse):
                 data = Response.json(resp)
@@ -972,14 +972,21 @@ class MemShellParty:
                 status_code=response_status_code,
             ) from None
 
+        error_text = ""
+        if isinstance(data, dict):
+            raw_error = data.get("error")
+            if isinstance(raw_error, str):
+                error_text = raw_error.strip()
+                if len(error_text) > 500:
+                    error_text = error_text[:500] + "..."
+        if error_text:
+            raise MemShellPartyError(
+                f"{error_text} (HTTP {response_status_code})",
+                status_code=response_status_code,
+            )
         if response_status_code >= 400:
             raise MemShellPartyError(
                 f"HTTP {response_status_code}",
-                status_code=response_status_code,
-            )
-        if isinstance(data, dict) and data.get("error"):
-            raise MemShellPartyError(
-                f"API response reported an error (HTTP {response_status_code})",
                 status_code=response_status_code,
             )
         return data
