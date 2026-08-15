@@ -371,6 +371,7 @@ Details: [docs/en/pykill.md](docs/en/pykill.md)
 ```bash
 memshell config
 memshell generate --shell-tool Behinder --shell-type Listener -o payload.txt
+memshell probe -o payload.txt
 memshell install-skill --project   # install to ./.agents/skills/memshell
 ```
 
@@ -454,7 +455,7 @@ Full key list: `wtfconfig.ini.example`; API details: [configutil](docs/en/config
 | `wtfutil.singleinstance` | Single-instance lock (`SingleInstance`, `@single_instance`) | [EN](docs/en/singleinstance.md) · [ZH](docs/zh/singleinstance.md) |
 | `wtfutil.util` | Misc helpers, `get_resource`, `UniqueQueue` | [EN](docs/en/util.md) · [ZH](docs/zh/util.md) |
 | **`pykill`** (CLI) | List/kill Python processes (wraps `procutil`) | [EN](docs/en/pykill.md) · [ZH](docs/zh/pykill.md) |
-| **`memshell`** (CLI) | MemShellParty generate / install-skill | [EN](docs/en/memshellutil.md) · [ZH](docs/zh/memshellutil.md) |
+| **`memshell`** (CLI) | MemShellParty generate / probe / install-skill | [EN](docs/en/memshellutil.md) · [ZH](docs/zh/memshellutil.md) |
 
 Public SDK APIs live in the physical submodules listed above. Import each symbol from its owning `wtfutil.<module>` path.
 

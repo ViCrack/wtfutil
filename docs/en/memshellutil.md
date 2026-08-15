@@ -240,7 +240,7 @@ meta = extract_generate_meta(result)
 
 ## generate_probe: probe shells
 
-`generate_probe` calls `POST /api/probe/generate`. Defaults match the official probe page: `method=ResponseBody`, `content=Command`, `shrink=True`, `static_initialize=True`, `seconds=5`, `server=Tomcat`. `jre` conversion matches `generate` (default 6; class ≥53 auto-sets `byPassJavaModule=True`).
+`generate_probe` calls `POST /api/probe/generate`. Defaults match the official probe page: `method=ResponseBody`, `content=Command`, `shrink=True`, `static_initialize=True`, `seconds=5`, `server=Tomcat`, `sleep_server=Tomcat`. `jre` conversion matches `generate` (default 6; class ≥53 auto-sets `byPassJavaModule=True`).
 
 `method` / `content` are case-insensitive within known names. The SDK does **not** validate pairings; illegal combos come back as `MemShellPartyError`. Empty `host` / `req_param_name` / `command_template` are omitted from JSON.
 
@@ -262,10 +262,11 @@ with MemShellParty() as client:
 Build the request without sending:
 
 ```python
-from wtfutil.memshellutil import build_probe_body
+from wtfutil.memshellutil import MemShellParty, build_probe_body
 
 req = build_probe_body(method="dnslog", content="server", host="x.example.test", jre=9)
-result = client.generate_probe(body=req)
+with MemShellParty() as client:
+    result = client.generate_probe(body=req)
 ```
 
 ---
@@ -389,10 +390,14 @@ The `memshell` console script ships with the package. Its `wtfutil.memshell` imp
 memshell generate --help
 memshell generate -o payload.txt
 memshell generate --shell-tool Godzilla --shell-type Filter --jre 9 -o out.txt
+memshell probe -o payload.txt
+memshell probe -m ResponseBody -c Command -p DefaultBase64 -o payload.txt
 memshell config
 memshell packers
 memshell install-skill --project
 ```
+
+`memshell probe` generates a probe shell (`POST /api/probe/generate`). `generate --probe` remains the memory-shell echo-probe flag, not the same subcommand.
 
 - **`-o PATH`**: write only `packResult` to the file; stdout is meta JSON.
 - **Without `-o`**: stdout is the full response JSON.
@@ -400,7 +405,7 @@ memshell install-skill --project
 - **`--server` / `--shell-tool` / `--shell-type`**: case-insensitive for known names.
 - Prefer `--password` / `--key`; dedicated `*-pass` and `--target-jre-version` still work but are hidden from `--help`.
 
-Flags mirror the kwargs table above; see `memshell generate --help`.
+Flags mirror the kwargs tables above; see `memshell generate --help` / `memshell probe --help`.
 
 ---
 
