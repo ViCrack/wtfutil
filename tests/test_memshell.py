@@ -1062,6 +1062,46 @@ class TestMemshellCli(unittest.TestCase):
         code = memshell_main(["install-skill"])
         self.assertEqual(code, 2)
 
+    def test_probe_writes_pack_result(self):
+        fake = {
+            "packResult": "example-probe-pack",
+            "probeShellResult": {
+                "shellClassName": "example.Probe",
+                "shellSize": 3,
+                "probeConfig": {"probeMethod": "ResponseBody", "probeContent": "Command"},
+                "probeContentConfig": {},
+            },
+        }
+        with tempfile.TemporaryDirectory() as td:
+            out = Path(td) / "p.txt"
+            with mock.patch("wtfutil.memshell.MemShellParty") as cls:
+                inst = cls.return_value
+                inst.generate_probe.return_value = fake
+                buf = io.StringIO()
+                with mock.patch("sys.stdout", buf):
+                    code = memshell_main(
+                        ["probe", "-m", "ResponseBody", "-c", "Command", "-o", str(out)]
+                    )
+            self.assertEqual(code, 0)
+            self.assertEqual(out.read_text(encoding="utf-8"), "example-probe-pack")
+            meta = json.loads(buf.getvalue())
+            self.assertEqual(meta["shellClassName"], "example.Probe")
+            self.assertNotIn("packResult", meta)
+            kwargs = inst.generate_probe.call_args.kwargs
+            self.assertEqual(kwargs.get("method"), "ResponseBody")
+            self.assertEqual(kwargs.get("content"), "Command")
+
+    def test_probe_error_no_traceback(self):
+        with mock.patch("wtfutil.memshell.MemShellParty") as cls:
+            inst = cls.return_value
+            inst.generate_probe.side_effect = MemShellPartyError("HTTP 400")
+            err = io.StringIO()
+            with mock.patch("sys.stderr", err):
+                code = memshell_main(["probe", "-m", "ResponseBody", "-c", "Command"])
+        self.assertEqual(code, 1)
+        self.assertIn("HTTP 400", err.getvalue())
+        self.assertNotIn("Traceback", err.getvalue())
+
 
 @unittest.skipUnless(_RUN_LIVE, "设置 MEMSHELL_RUN_LIVE=1 以运行外部联调")
 class TestMemShellPartyLive(unittest.TestCase):
