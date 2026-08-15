@@ -25,7 +25,9 @@ from wtfutil.memshellutil import (
     MemShellPartyError,
     _build_connect_retry,
     build_generate_body,
+    build_probe_body,
     extract_generate_meta,
+    extract_probe_meta,
     resolve_shell_credentials,
 )
 
@@ -234,6 +236,59 @@ class TestBuildGenerateBody(unittest.TestCase):
         self.assertTrue(body["shellConfig"]["byPassJavaModule"])
 
 
+class TestBuildProbeBody(unittest.TestCase):
+    def test_defaults(self):
+        body = build_probe_body()
+        self.assertEqual(body["probeConfig"]["probeMethod"], "ResponseBody")
+        self.assertEqual(body["probeConfig"]["probeContent"], "Command")
+        self.assertEqual(body["probeConfig"]["targetJreVersion"], 50)
+        self.assertFalse(body["probeConfig"]["byPassJavaModule"])
+        self.assertTrue(body["probeConfig"]["shrink"])
+        self.assertTrue(body["probeConfig"]["staticInitialize"])
+        self.assertFalse(body["probeConfig"]["debug"])
+        self.assertFalse(body["probeConfig"]["lambdaSuffix"])
+        self.assertEqual(body["packer"], "DefaultBase64")
+        self.assertEqual(body["probeContentConfig"]["server"], "Tomcat")
+        self.assertEqual(body["probeContentConfig"]["sleepServer"], "Tomcat")
+        self.assertEqual(body["probeContentConfig"]["seconds"], 5)
+        self.assertNotIn("host", body["probeContentConfig"])
+        self.assertNotIn("reqParamName", body["probeContentConfig"])
+
+    def test_jre9_auto_bypass_and_casefold(self):
+        body = build_probe_body(method="dnslog", content="server", jre=9, host="x.example.test")
+        self.assertEqual(body["probeConfig"]["probeMethod"], "DNSLog")
+        self.assertEqual(body["probeConfig"]["probeContent"], "Server")
+        self.assertEqual(body["probeConfig"]["targetJreVersion"], 53)
+        self.assertTrue(body["probeConfig"]["byPassJavaModule"])
+        self.assertEqual(body["probeContentConfig"]["host"], "x.example.test")
+
+    def test_script_engine_and_filter_casefold(self):
+        body = build_probe_body(content="scriptengine")
+        self.assertEqual(body["probeConfig"]["probeContent"], "ScriptEngine")
+        body2 = build_probe_body(content="filter")
+        self.assertEqual(body2["probeConfig"]["probeContent"], "Filter")
+
+    def test_rejects_bool_seconds(self):
+        with self.assertRaises((TypeError, ValueError)):
+            build_probe_body(seconds=True)
+
+    def test_omits_empty_content_fields(self):
+        body = build_probe_body(host="", req_param_name="", command_template="")
+        self.assertNotIn("host", body["probeContentConfig"])
+        self.assertNotIn("reqParamName", body["probeContentConfig"])
+        self.assertNotIn("commandTemplate", body["probeContentConfig"])
+
+    def test_body_merge_and_unknown_passthrough(self):
+        body = build_probe_body(
+            {"probeConfig": {"probeMethod": "Sleep"}, "packer": "JSP"},
+            method="ResponseBody",
+            content="NopeContent",
+        )
+        self.assertEqual(body["probeConfig"]["probeMethod"], "Sleep")
+        self.assertEqual(body["probeConfig"]["probeContent"], "NopeContent")
+        self.assertEqual(body["packer"], "JSP")
+
+
 class TestExtractGenerateMeta(unittest.TestCase):
     def test_strips_bytes_and_exposes_output(self):
         result = {
@@ -296,6 +351,30 @@ class TestExtractGenerateMeta(unittest.TestCase):
                         }
                     }
                 )
+
+
+class TestExtractProbeMeta(unittest.TestCase):
+    def test_strips_payload_and_exposes_output(self):
+        meta = extract_probe_meta(
+            {
+                "packResult": "example-pack",
+                "probeShellResult": {
+                    "shellClassName": "example.Probe",
+                    "shellSize": 12,
+                    "shellBytesBase64Str": "example-bytes",
+                    "probeConfig": {"probeMethod": "ResponseBody", "probeContent": "Command"},
+                    "probeContentConfig": {"host": "x.example.test"},
+                },
+            },
+            output="C:\\out.txt",
+        )
+        self.assertEqual(meta["shellClassName"], "example.Probe")
+        self.assertEqual(meta["shellSize"], 12)
+        self.assertTrue(meta["hasPackResult"])
+        self.assertFalse(meta["hasAllPackResults"])
+        self.assertEqual(meta["output"], "C:\\out.txt")
+        self.assertNotIn("packResult", meta)
+        self.assertNotIn("shellBytesBase64Str", meta)
 
 
 class TestMemShellPartyClient(unittest.TestCase):
@@ -635,6 +714,34 @@ class TestMemShellPartyClient(unittest.TestCase):
         self.assertEqual(ctx.exception.status_code, 200)
         self.assertIsNone(ctx.exception.body)
         self.assertNotIn("example-sensitive", str(ctx.exception))
+        client.close()
+
+    def test_generate_probe_posts_json(self):
+        session = mock.Mock()
+        session.request.return_value = _fake_resp(
+            {"packResult": "example-probe", "probeShellResult": {"shellClassName": "P"}}
+        )
+        client = MemShellParty(base_url="https://example.test/", session=session)
+        result = client.generate_probe(method="ResponseBody", content="Command")
+        self.assertEqual(result["packResult"], "example-probe")
+        args, kwargs = session.request.call_args
+        self.assertEqual(args[0], "POST")
+        self.assertTrue(args[1].endswith("/api/probe/generate"))
+        self.assertEqual(kwargs["json"]["probeConfig"]["probeMethod"], "ResponseBody")
+        self.assertEqual(kwargs["json"]["probeConfig"]["probeContent"], "Command")
+        self.assertTrue(kwargs["json"]["probeConfig"]["shrink"])
+        client.close()
+
+    def test_generate_probe_http_error_redacts_body(self):
+        session = mock.Mock()
+        session.request.return_value = _fake_resp(
+            {"error": "example-server-secret"}, status_code=400
+        )
+        client = MemShellParty(base_url="https://example.test/", session=session)
+        with self.assertRaises(MemShellPartyError) as ctx:
+            client.generate_probe()
+        self.assertIsNone(ctx.exception.body)
+        self.assertNotIn("example-server-secret", str(ctx.exception))
         client.close()
 
 

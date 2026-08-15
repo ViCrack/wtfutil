@@ -1,5 +1,5 @@
 """
-MemShellParty HTTP API 客户端：生成内存马 / 查询配置。
+MemShellParty HTTP API 客户端：生成内存马 / 探测马 / 查询配置。
 
 默认服务：https://party.mem.mk（可通过构造参数、环境变量或 wtfconfig.ini [memshell] 覆盖）。
 本模块不做结果缓存；频繁调用时请由调用方自行缓存。
@@ -161,6 +161,22 @@ KNOWN_SHELL_TYPES = (
     "WebSocket",
 )
 
+KNOWN_PROBE_METHODS = (
+    "ResponseBody",
+    "DNSLog",
+    "Sleep",
+)
+KNOWN_PROBE_CONTENTS = (
+    "Server",
+    "JDK",
+    "Command",
+    "Bytecode",
+    "ScriptEngine",
+    "Filter",
+    "BasicInfo",
+    "OS",
+)
+
 
 def _casefold_lookup(names: tuple[str, ...]) -> dict[str, str]:
     return {n.casefold(): n for n in names}
@@ -169,6 +185,8 @@ def _casefold_lookup(names: tuple[str, ...]) -> dict[str, str]:
 _SERVER_LOOKUP = _casefold_lookup(KNOWN_SERVERS)
 _SHELL_TOOL_LOOKUP = _casefold_lookup(KNOWN_SHELL_TOOLS)
 _SHELL_TYPE_LOOKUP = _casefold_lookup(KNOWN_SHELL_TYPES)
+_PROBE_METHOD_LOOKUP = _casefold_lookup(KNOWN_PROBE_METHODS)
+_PROBE_CONTENT_LOOKUP = _casefold_lookup(KNOWN_PROBE_CONTENTS)
 
 
 def _build_connect_retry(connect_retries: int, retry_backoff: float) -> Retry:
@@ -247,6 +265,18 @@ def canonicalize_shell_type(value: str) -> str:
     if value is None or value == "":
         return value
     return _SHELL_TYPE_LOOKUP.get(str(value).casefold(), value)
+
+
+def canonicalize_probe_method(value: str) -> str:
+    """将探测方法归一为官方大小写；未知名称 strip 后原样返回。"""
+    text = (value or "").strip()
+    return _PROBE_METHOD_LOOKUP.get(text.casefold(), text)
+
+
+def canonicalize_probe_content(value: str) -> str:
+    """将探测内容归一为官方大小写；未知名称 strip 后原样返回。"""
+    text = (value or "").strip()
+    return _PROBE_CONTENT_LOOKUP.get(text.casefold(), text)
 
 
 def _canonicalize_shell_config(shell_config: dict) -> None:
@@ -513,12 +543,136 @@ def extract_generate_meta(result: dict, *, output: str | None = None) -> dict:
     return meta
 
 
+def build_probe_body(
+    body: dict | None = None,
+    *,
+    method: str = "ResponseBody",
+    content: str = "Command",
+    packer: str = "DefaultBase64",
+    jre: int | str | None = None,
+    target_jre_version: int | str | None = None,
+    debug: bool = False,
+    by_pass_java_module: bool | None = None,
+    shrink: bool = True,
+    lambda_suffix: bool = False,
+    static_initialize: bool = True,
+    shell_class_name: str = "",
+    host: str = "",
+    seconds: int | None = 5,
+    sleep_server: str = "Tomcat",
+    server: str = "Tomcat",
+    req_param_name: str = "",
+    command_template: str = "",
+) -> dict:
+    """
+    组装官方 POST /api/probe/generate 请求体（camelCase 字段）。
+
+    ``method`` / ``content`` 在已知集合内**不区分大小写**
+    （如 ``dnslog`` → ``DNSLog``，``scriptengine`` → ``ScriptEngine``）；未知名称 strip 后原样上传。
+    不校验 method 与 content 的前端合法组合，非法组合由服务端返回 HTTP 错误。
+    目标字节码版本请优先传 ``jre``（Java 发行版：6/8/9/11/17/21/22）；
+    ``target_jre_version`` 仍可用（发行版或 class 主版本均可，见 :func:`resolve_jre_class_version`）。
+    二者同时传入时以 ``jre`` 为准。默认 JRE 6。
+    若同时传入 ``body``，则在 kwargs 组装结果上深度合并覆盖。
+    ``body`` 内的 ``targetJreVersion`` 按官方语义原样使用（不会再做发行版换算）；发行版请用 kwargs ``jre``。
+    ``by_pass_java_module`` 为 None 时：解析后的 class 版本对应 Java 9+（≥53）自动 True。
+    ``probeContentConfig`` 只放入有值的字段：空字符串与 ``seconds is None`` 省略。
+    """
+    if body is not None and not isinstance(body, dict):
+        raise TypeError("body must be a dictionary or None")
+    if jre is not None:
+        class_ver = resolve_jre_class_version(jre)
+    elif target_jre_version is not None:
+        class_ver = resolve_jre_class_version(target_jre_version)
+    else:
+        class_ver = JRE_RELEASE_TO_CLASS[6]
+    if by_pass_java_module is None:
+        by_pass_java_module = class_ver >= JRE_RELEASE_TO_CLASS[9]
+    if seconds is not None:
+        if isinstance(seconds, bool) or not isinstance(seconds, int):
+            raise TypeError("seconds must be an integer or None")
+    content_cfg: dict[str, Any] = {}
+    for key, value in (
+        ("host", host),
+        ("sleepServer", sleep_server),
+        ("server", server),
+        ("reqParamName", req_param_name),
+        ("commandTemplate", command_template),
+    ):
+        if value:
+            content_cfg[key] = value
+    if seconds is not None:
+        content_cfg["seconds"] = seconds
+    built = {
+        "probeConfig": {
+            "probeMethod": canonicalize_probe_method(method),
+            "probeContent": canonicalize_probe_content(content),
+            "shellClassName": shell_class_name,
+            "targetJreVersion": class_ver,
+            "debug": debug,
+            "byPassJavaModule": by_pass_java_module,
+            "shrink": shrink,
+            "staticInitialize": static_initialize,
+            "lambdaSuffix": lambda_suffix,
+        },
+        "probeContentConfig": content_cfg,
+        "packer": packer,
+    }
+    if body:
+        built = _deep_merge(built, body)
+    pc = built.get("probeConfig")
+    if not isinstance(pc, dict):
+        raise TypeError("body.probeConfig must be an object")
+    pcc = built.get("probeContentConfig")
+    if not isinstance(pcc, dict):
+        raise TypeError("body.probeContentConfig must be an object")
+    if "probeMethod" in pc:
+        pc["probeMethod"] = canonicalize_probe_method(pc["probeMethod"])
+    if "probeContent" in pc:
+        pc["probeContent"] = canonicalize_probe_content(pc["probeContent"])
+    built["probeContentConfig"] = {
+        k: v for k, v in pcc.items() if v not in ("", None)
+    }
+    return built
+
+
+def extract_probe_meta(result: dict, *, output: str | None = None) -> dict:
+    """
+    从 generate_probe 响应提取紧凑元信息（类名、尺寸、探测配置），不含 packResult。
+
+    供 CLI ``-o`` 模式向 stdout 打印，便于 AI/脚本解析。
+    """
+    if not isinstance(result, dict):
+        raise TypeError("result must be a dictionary")
+    probe = result.get("probeShellResult", {})
+    if not isinstance(probe, dict):
+        raise TypeError("result.probeShellResult must be an object")
+    probe_cfg = probe.get("probeConfig", {})
+    if not isinstance(probe_cfg, dict):
+        raise TypeError("result.probeShellResult.probeConfig must be an object")
+    content_cfg = probe.get("probeContentConfig", {})
+    if not isinstance(content_cfg, dict):
+        raise TypeError("result.probeShellResult.probeContentConfig must be an object")
+    meta: dict[str, Any] = {
+        "shellClassName": probe.get("shellClassName"),
+        "shellSize": probe.get("shellSize"),
+        "probeConfig": probe_cfg,
+        "probeContentConfig": content_cfg,
+        "hasPackResult": bool(result.get("packResult")),
+        "hasAllPackResults": bool(result.get("allPackResults")),
+    }
+    if output is not None:
+        meta["output"] = output
+    return meta
+
+
 _SAFE_REQUEST_PATHS = frozenset(
     {
         "/api/config",
         "/api/config/packers/tree",
         "/api/config/command/configs",
         "/api/memshell/generate",
+        "/api/probe/generate",
     }
 )
 
@@ -723,6 +877,25 @@ class MemShellParty:
         )
         return self._parse_response(resp)
 
+    def generate_probe(self, body: dict | None = None, **kwargs: Any) -> dict:
+        """
+        POST /api/probe/generate — 生成探测马并打包。
+
+        与 ``generate(probe=True)`` 不是同一件事：后者只是内存马生成里的回显探测开关，
+        本方法走独立的探测马接口。
+        参数与 :func:`build_probe_body` 相同（snake_case → 官方 camelCase）。
+        可传完整 ``body``；与 kwargs 同时存在时 body 深度覆盖。
+        返回含 ``packResult`` / ``probeShellResult`` 的完整响应；不做缓存。
+        """
+        req_body = build_probe_body(body, **kwargs)
+        resp = self._request(
+            "POST",
+            "/api/probe/generate",
+            json=req_body,
+            headers={"Content-Type": "application/json", "Accept": "*/*"},
+        )
+        return self._parse_response(resp)
+
 
 __all__ = [
     "DEFAULT_BASE_URL",
@@ -733,10 +906,12 @@ __all__ = [
     "MemShellParty",
     "MemShellPartyError",
     "build_generate_body",
+    "build_probe_body",
     "canonicalize_server",
     "canonicalize_shell_tool",
     "canonicalize_shell_type",
     "extract_generate_meta",
+    "extract_probe_meta",
     "memshell_config",
     "resolve_jre_class_version",
     "resolve_shell_credentials",
