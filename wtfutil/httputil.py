@@ -145,10 +145,16 @@ class RequestsSession(requests.Session):
         pre_send_hooks (List[Callable]): 在 send 阶段执行的 hook 列表
     """
 
-    def __init__(self, debug: bool = False, rate_limit: Optional[int] = None):
+    def __init__(
+        self,
+        debug: bool = False,
+        rate_limit: Optional[int] = None,
+        timeout: Optional[float] = None,
+    ):
         super().__init__()
         self.hooks["response"].insert(0, _enrich_json_errors)
         self._debug = debug
+        self._timeout = timeout
         if rate_limit is not None and rate_limit <= 0:
             raise ValueError("rate_limit must be a positive number")
         self._rate_limit = rate_limit  # 每秒请求限制（例如 10 表示 10 次/秒）
@@ -157,12 +163,12 @@ class RequestsSession(requests.Session):
         self.pre_send_hooks: List[Callable[[requests.PreparedRequest, dict], None]] = []
 
     def pre_request(self, func: Callable):
-        """装饰器，用于注册 pre_request_hook
-        # 使用示例
-        session = RequestsSession()
+        """装饰器，用于注册 pre_request_hook。
+
+        session = requests_session()
 
         @session.pre_request
-        def add_custom_header(request, *args, **kwargs):
+        def add_custom_header(request):
             request.headers['X-Custom'] = 'Value'
         """
 
@@ -225,6 +231,8 @@ class RequestsSession(requests.Session):
         Returns:
             requests.Response: 服务器返回的响应对象
         """
+        if self._timeout is not None:
+            kwargs.setdefault("timeout", self._timeout)
         # 速率限制
         if self._rate_limit:
             elapsed = time.time() - self._last_request_time
@@ -247,10 +255,10 @@ class BaseUrlSession(RequestsSession):
 
     base_url = None
 
-    def __init__(self, base_url=None, debug=False, rate_limit=None):
+    def __init__(self, base_url=None, debug=False, rate_limit=None, timeout=None):
         if base_url:
             self.base_url = base_url
-        super().__init__(debug=debug, rate_limit=rate_limit)
+        super().__init__(debug=debug, rate_limit=rate_limit, timeout=timeout)
 
     def request(self, method, url, *args, **kwargs):
         """生成完整 URL 后发送请求。"""
@@ -678,7 +686,7 @@ def requests_session(
         verify: 是否校验 TLS 证书，或 CA 证书路径。默认 False。
 
     Returns:
-        一个根据配置生成的 session 对象（CachedSession, BaseUrlSession 或 RequestsSession）。
+        一个根据配置生成的 session 对象（CachedSession、BaseUrlSession 或内部增强 Session）。
 
     Raises:
         TypeError: 如果 proxies 类型无效。
@@ -697,9 +705,9 @@ def requests_session(
             session = CachedSession()
         session.hooks.setdefault("response", []).insert(0, _enrich_json_errors)
     elif base_url:
-        session = BaseUrlSession(base_url, debug=debug, rate_limit=rate_limit)
+        session = BaseUrlSession(base_url, debug=debug, rate_limit=rate_limit, timeout=timeout)
     else:
-        session = RequestsSession(debug=debug, rate_limit=rate_limit)
+        session = RequestsSession(debug=debug, rate_limit=rate_limit, timeout=timeout)
 
     session.get_redirect_target = get_redirect_target.__get__(session, type(session))
 
@@ -757,8 +765,14 @@ def requests_session(
         session.mount('http://', adapter)
         session.mount('https://', adapter)
 
-    if timeout is not None:
-        session.request = functools.partial(session.request, timeout=timeout)
+    if timeout is not None and use_cache:
+        original_request = session.request
+
+        def request(method, url, *args, **kwargs):
+            kwargs.setdefault("timeout", timeout)
+            return original_request(method, url, *args, **kwargs)
+
+        session.request = request
 
     if proxies:
         if isinstance(proxies, dict):
@@ -1091,7 +1105,6 @@ __all__ = [
     'httpraw',
     'requests_session',
     # --- 类 ---
-    'RequestsSession',
     'BaseUrlSession',
     'CustomSslContextHttpAdapter',
     'ChunkedConfig',

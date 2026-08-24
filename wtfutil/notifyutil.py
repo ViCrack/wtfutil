@@ -16,15 +16,17 @@ from email.header import Header
 from email.mime.text import MIMEText
 from email.utils import formataddr
 
+from requests import Session
+
 from .configutil import ensure_section
-from .httputil import RequestsSession, requests_session
+from .httputil import requests_session
 
 logger = logging.getLogger(__name__)
 
 _request_context = threading.local()
 
 
-def _get_req() -> RequestsSession:
+def _get_req() -> Session:
     """返回当前线程独立的通知 Session，避免并发共享可变状态。"""
     session = getattr(_request_context, "session", None)
     if session is None:

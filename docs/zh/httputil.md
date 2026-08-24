@@ -24,7 +24,7 @@ from wtfutil.httputil import httpraw, requests_session
 |------|----------|
 | `use_cache` 为真 | `requests_cache.CachedSession` |
 | `base_url` 非空 | `BaseUrlSession` |
-| 其它 | `RequestsSession` |
+| 其它 | 内部增强 Session |
 
 无论哪种：TLS 证书默认不校验（`verify=False`），HTTPS 使用 `CustomSslContextHttpAdapter` 兼容旧式服务端连接；该兼容上下文同时用于直连和经过代理的 HTTPS 连接。调用方仍可传 `verify=True` 或 CA bundle 路径恢复校验。
 
@@ -121,9 +121,9 @@ response = session.get("/users")
 # 实际 URL：https://example.com/api/v1/users
 ```
 
-## RequestsSession 与 Hook
+## Session Hook
 
-`prepare_request` 时自动补 `Referer`、`Origin`（若未提供）。
+`prepare_request` 时自动补 `Referer`、`Origin`（若未提供）。非 `use_cache` 时，`requests_session()` 返回的会话还支持：
 
 - `@session.pre_request`：在未 prepare 的 `Request` 上修改。
 - `@session.pre_send`：在 `PreparedRequest` 上，第二参数为 `send` 的 `kwargs`。

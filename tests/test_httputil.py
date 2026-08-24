@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import functools
 import io
 import ssl
 import subprocess
@@ -88,6 +89,41 @@ class TestRequestsSession(unittest.TestCase):
                     self.assertIn("<html>not-json</html>", message)
                     self.assertEqual(stdout.getvalue(), "")
                     self.assertEqual(stderr.getvalue(), "")
+
+    def test_default_timeout_is_applied_and_can_be_overridden(self) -> None:
+        captured: dict[str, object] = {}
+
+        def fake_request(self, method, url, *args, **kwargs):
+            captured["timeout"] = kwargs.get("timeout")
+            response = requests.Response()
+            response.status_code = 200
+            response._content = b""
+            return response
+
+        session_options = (
+            {},
+            {"base_url": "https://example.test"},
+        )
+        for options in session_options:
+            with self.subTest(options=options):
+                with httputil.requests_session(
+                    user_agent="test-agent",
+                    timeout=7,
+                    **options,
+                ) as session:
+                    self.assertNotIsInstance(session.request, functools.partial)
+                    with mock.patch("requests.sessions.Session.request", fake_request):
+                        session.request("GET", "https://example.test/")
+                        self.assertEqual(captured["timeout"], 7)
+                        session.request("GET", "https://example.test/", timeout=3)
+                        self.assertEqual(captured["timeout"], 3)
+
+        with httputil.requests_session(
+            user_agent="test-agent",
+            timeout=7,
+            use_cache={"backend": "memory"},
+        ) as cached_session:
+            self.assertNotIsInstance(cached_session.request, functools.partial)
 
     def test_chunked_session_does_not_patch_global_connections(self) -> None:
         original_request = urllib3.connection.HTTPConnection.request

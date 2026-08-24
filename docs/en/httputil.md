@@ -18,7 +18,7 @@ The legacy helpers remain available for explicit opt-in compatibility and affect
 
 ## requests_session()
 
-Factory returning a pre-configured session (`CachedSession`, `BaseUrlSession`, or `RequestsSession`) with TLS verification disabled by default, retry adapters, and `CustomSslContextHttpAdapter` on HTTPS. The adapter applies its legacy-server TLS context to both direct and proxied HTTPS connections. Pass `verify=True` or a CA bundle path to opt into verification.
+Factory returning a pre-configured session (`CachedSession`, `BaseUrlSession`, or an internal enhanced session) with TLS verification disabled by default, retry adapters, and `CustomSslContextHttpAdapter` on HTTPS. The adapter applies its legacy-server TLS context to both direct and proxied HTTPS connections. Pass `verify=True` or a CA bundle path to opt into verification.
 
 `use_cache` cannot be combined with `base_url`, `debug`, or `rate_limit`; these combinations raise `ValueError` rather than silently ignoring enhancements. Providing a fixed `user_agent` does not initialize the random user-agent provider.
 
@@ -67,7 +67,7 @@ Install the optional SOCKS dependency when using SOCKS proxies:
 pip install "wtfutil[socks]"
 ```
 
-## RequestsSession hooks
+## Session hooks
 
 `requests_session()` wraps `response.json()` so decode failures append URL, status, and a truncated body preview to the original exception. The response type remains `requests.Response`.
 
