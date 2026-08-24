@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import io
 import ssl
 import subprocess
 import sys
@@ -54,6 +55,39 @@ class TestRequestsSession(unittest.TestCase):
             verify=True,
         ) as verified_session:
             self.assertIs(verified_session.verify, True)
+
+    def test_json_decode_error_includes_preview_without_printing(self) -> None:
+        session_options = (
+            {},
+            {"use_cache": {"backend": "memory"}},
+        )
+        for options in session_options:
+            with self.subTest(options=options):
+                with httputil.requests_session(user_agent="test-agent", **options) as session:
+                    response = requests.Response()
+                    response.status_code = 502
+                    response.url = "https://example.test/api"
+                    response._content = b"<html>not-json</html>"
+                    response.encoding = "utf-8"
+                    for hook in session.hooks.get("response", []):
+                        hook(response)
+
+                    self.assertIs(type(response), requests.Response)
+                    stdout = io.StringIO()
+                    stderr = io.StringIO()
+                    with (
+                        mock.patch("sys.stdout", stdout),
+                        mock.patch("sys.stderr", stderr),
+                        self.assertRaises(requests.exceptions.JSONDecodeError) as ctx,
+                    ):
+                        response.json()
+
+                    message = str(ctx.exception)
+                    self.assertIn("https://example.test/api", message)
+                    self.assertIn("502", message)
+                    self.assertIn("<html>not-json</html>", message)
+                    self.assertEqual(stdout.getvalue(), "")
+                    self.assertEqual(stderr.getvalue(), "")
 
     def test_chunked_session_does_not_patch_global_connections(self) -> None:
         original_request = urllib3.connection.HTTPConnection.request

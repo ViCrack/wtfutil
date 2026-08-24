@@ -11,12 +11,12 @@ import math
 from typing import Any
 from urllib.parse import urlsplit
 
-from requests import Response, Session
+from requests import Session
 from requests.exceptions import RequestException
 from urllib3.util import Retry
 
 from .configutil import ensure_section
-from .httputil import EnhancedResponse, requests_session
+from .httputil import requests_session
 
 DEFAULT_BASE_URL = "https://party.mem.mk"
 
@@ -650,10 +650,7 @@ class MemShellParty:
     def _parse_response(self, resp: Any) -> Any:
         """解析 JSON；错误仅公开固定类别和 HTTP 状态码。"""
         try:
-            if isinstance(resp, EnhancedResponse):
-                data = Response.json(resp)
-            else:
-                data = resp.json()
+            data = resp.json()
         except Exception:
             response_status_code = resp.status_code
             response_is_invalid_json = True

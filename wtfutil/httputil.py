@@ -116,20 +116,21 @@ urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 remove_ssl_verify()
 
 
-class EnhancedResponse(Response):
-    def json(self, **kwargs):
-        try:
-            return super().json(**kwargs)
-        except JSONDecodeError as e:
-            # 如果开了debug，那么http数据库都会打印，就不需要重复了
-            if not self._debug:
-                print("-" * 50)
-                print(f"Request URL: {self.url}")
-                print(f"Response status code: {self.status_code}")
-                print(f"JSONDecodeError: {e}")
-                print(f"Response text: {self.text}")
-                print("-" * 50)
-            raise
+def _json_with_preview(response, **kwargs):
+    try:
+        return Response.json(response, **kwargs)
+    except JSONDecodeError as e:
+        body = response.text or ""
+        if len(body) > 1000:
+            body = body[:1000] + "..."
+        extra = f" (url={response.url}, status={response.status_code}, body={body!r})"
+        e.args = (f"{e.args[0]}{extra}",) + e.args[1:]
+        raise
+
+
+def _enrich_json_errors(response, **_kwargs):
+    response.json = functools.partial(_json_with_preview, response)
+    return response
 
 
 class RequestsSession(requests.Session):
@@ -146,6 +147,7 @@ class RequestsSession(requests.Session):
 
     def __init__(self, debug: bool = False, rate_limit: Optional[int] = None):
         super().__init__()
+        self.hooks["response"].insert(0, _enrich_json_errors)
         self._debug = debug
         if rate_limit is not None and rate_limit <= 0:
             raise ValueError("rate_limit must be a positive number")
@@ -237,9 +239,6 @@ class RequestsSession(requests.Session):
             dumped_data = dump.dump_all(response, request_prefix=b"> ", response_prefix=b"< ")
             print(dumped_data.decode('utf-8'))
             print("-" * 50)  # 分隔符
-        # 将 response 的类替换，增加json的打印调试
-        response.__class__ = EnhancedResponse
-        response._debug = self._debug
         return response
 
 
@@ -696,6 +695,7 @@ def requests_session(
             session = CachedSession(**use_cache)
         else:
             session = CachedSession()
+        session.hooks.setdefault("response", []).insert(0, _enrich_json_errors)
     elif base_url:
         session = BaseUrlSession(base_url, debug=debug, rate_limit=rate_limit)
     else:
@@ -1091,7 +1091,6 @@ __all__ = [
     'httpraw',
     'requests_session',
     # --- 类 ---
-    'EnhancedResponse',
     'RequestsSession',
     'BaseUrlSession',
     'CustomSslContextHttpAdapter',

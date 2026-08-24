@@ -69,6 +69,8 @@ pip install "wtfutil[socks]"
 
 ## RequestsSession hooks
 
+`requests_session()` wraps `response.json()` so decode failures append URL, status, and a truncated body preview to the original exception. The response type remains `requests.Response`.
+
 ```python
 session = requests_session()
 
@@ -98,7 +100,6 @@ resp = httpraw(raw, ssl=True, timeout=10)
 
 | Symbol | Description |
 |--------|-------------|
-| `EnhancedResponse` | Better debug on `json()` failure |
 | `BaseUrlSession` | Fixed base URL |
 | `CustomSslContextHttpAdapter` | Legacy TLS renegotiation |
 | `ChunkedConfig` / `ChunkedAdapter` | Chunked encoding |

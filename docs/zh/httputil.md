@@ -54,7 +54,7 @@ def requests_session(
 |------|--------|------------|
 | `proxies` | `False` | `False`/`None`：不按此处设代理。`dict`：并 `trust_env=False`。`int`：`127.0.0.1:端口`。`str`：HTTP/HTTPS 同一代理 URL。 |
 | `timeout` | `None` | 固定到每次 `request` 的默认超时。 |
-| `debug` | `False` | 打印原始请求/响应；响应用 `EnhancedResponse`。 |
+| `debug` | `False` | 打印原始请求/响应。 |
 | `base_url` | `None` | `BaseUrlSession`；请求路径开头的 `/` 会先被去除，再继续拼接到 `base_url` 的路径后。 |
 | `user_agent` | `None` | `None` 则随机 UA。 |
 | `use_cache` | `None` | `True` 或 `dict` 传给 `CachedSession`。 |
@@ -72,6 +72,7 @@ def requests_session(
 - 仅当通过 **`proxies` 参数**设置代理时，`trust_env=False`。
 - 支持 `with requests_session(...) as s:`。
 - 单次请求仍可覆盖 `headers`、`timeout` 等。
+- `json()` 解析失败时，异常信息会带上 URL、状态码和截断正文预览；响应类型仍是 `requests.Response`。
 
 ### 用法示例
 
@@ -150,7 +151,6 @@ resp = httpraw(raw, ssl=True, timeout=10)
 
 | 符号 | 说明 |
 |------|------|
-| `EnhancedResponse` | `json()` 失败时更易排错 |
 | `BaseUrlSession` | 固定 `base_url` |
 | `CustomSslContextHttpAdapter` | 老旧 TLS 兼容 |
 | `ChunkedConfig` / `ChunkedAdapter` | 分块编码 |

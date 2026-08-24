@@ -58,3 +58,9 @@ wtfconfig.ini
 
 # Local linked worktrees
 .worktrees/
+
+docs/superpowers/
+.agents/
+skills-lock.json
+
+
