@@ -6,6 +6,7 @@ memshell - MemShellParty 内存马生成 CLI（AI / 脚本友好）
     memshell config
     memshell packers
     memshell generate -o payload.txt
+    memshell probe -o payload.txt
     memshell generate --help
     memshell install-skill --project
 """
@@ -20,9 +21,12 @@ from importlib import resources
 from pathlib import Path
 
 from .memshellutil import (
+    MemShellGenerateResult,
     MemShellParty,
     MemShellPartyError,
+    ProbeGenerateResult,
     extract_generate_meta,
+    extract_probe_meta,
 )
 
 __all__ = ["main"]
@@ -57,8 +61,31 @@ _GENERATE_EPILOG = """
   memshell generate --help
 """
 
+_PROBE_EPILOG = """
+常用参数（method / content / server / sleep-server 在已知名称内不区分大小写）：
+
+  --method / --content   探测方法与内容（默认 ResponseBody / Command）
+  --jre                  目标 Java 发行版本：6/8/9/11/17/21/22（默认 6；JDK9+ 用 ≥9）
+  --packer               打包格式
+  --host / --seconds     DNSLog 回连域名；Sleep 等待秒数（默认 5）
+  --server / --sleep-server   探测内容 / Sleep 对应的中间件（默认 Tomcat）
+  -o/--output            仅写 packResult；stdout 打印 meta JSON
+
+其它（可选）：
+  --by-pass-java-module / --no-by-pass-java-module / --no-shrink / --no-static-initialize
+  --debug / --lambda-suffix / --shell-class-name
+  --req-param-name / --command-template / --base-url
+
+示例：
+  memshell probe -o payload.txt
+  memshell probe -m ResponseBody -c Command -p DefaultBase64 -o payload.txt
+  memshell probe --help
+"""
+
 
 def _print_json(data: object) -> None:
+    if isinstance(data, (MemShellGenerateResult, ProbeGenerateResult)):
+        data = data.to_dict()
     print(json.dumps(data, ensure_ascii=False, indent=2))
 
 
@@ -160,10 +187,12 @@ def _cmd_generate(args: argparse.Namespace) -> int:
     client = _client_from_args(args)
     try:
         result = client.generate(body_override, **gen_kwargs)
+        if not isinstance(result, MemShellGenerateResult):
+            raise MemShellPartyError("invalid JSON response")
+        pack = result.pack_result
+        all_packs = result.all_pack_results
 
         if args.output:
-            pack = result.get("packResult")
-            all_packs = result.get("allPackResults")
             if pack:
                 Path(args.output).write_text(str(pack), encoding="utf-8")
             elif all_packs:
@@ -174,6 +203,59 @@ def _cmd_generate(args: argparse.Namespace) -> int:
             else:
                 raise MemShellPartyError("response has no packResult / allPackResults")
             meta = extract_generate_meta(result, output=str(Path(args.output).resolve()))
+            _print_json(meta)
+        else:
+            _print_json(result)
+    finally:
+        client.close()
+    return 0
+
+
+def _cmd_probe(args: argparse.Namespace) -> int:
+    """调用 generate_probe；-o 时只写 packResult，stdout 输出 meta。"""
+    try:
+        seconds = int(args.seconds)
+    except (TypeError, ValueError):
+        raise ValueError("seconds must be an integer") from None
+    kwargs = {
+        "method": args.method,
+        "content": args.content,
+        "packer": args.packer,
+        "debug": args.debug,
+        "by_pass_java_module": args.by_pass_java_module,
+        "shrink": not args.no_shrink,
+        "lambda_suffix": args.lambda_suffix,
+        "static_initialize": not args.no_static_initialize,
+        "shell_class_name": args.shell_class_name,
+        "host": args.host,
+        "seconds": seconds,
+        "sleep_server": args.sleep_server,
+        "server": args.server,
+        "req_param_name": args.req_param_name,
+        "command_template": args.command_template,
+    }
+    if getattr(args, "jre", None) is not None:
+        kwargs["jre"] = args.jre
+
+    client = _client_from_args(args)
+    try:
+        result = client.generate_probe(**kwargs)
+        if not isinstance(result, ProbeGenerateResult):
+            raise MemShellPartyError("invalid JSON response")
+        pack = result.pack_result
+        all_packs = result.all_pack_results
+
+        if args.output:
+            if pack:
+                Path(args.output).write_text(str(pack), encoding="utf-8")
+            elif all_packs:
+                Path(args.output).write_text(
+                    json.dumps(all_packs, ensure_ascii=False, indent=2),
+                    encoding="utf-8",
+                )
+            else:
+                raise MemShellPartyError("response has no packResult / allPackResults")
+            meta = extract_probe_meta(result, output=str(Path(args.output).resolve()))
             _print_json(meta)
         else:
             _print_json(result)
@@ -251,6 +333,7 @@ def main(argv: list[str] | None = None) -> int:
             "示例:\n"
             "  memshell config\n"
             "  memshell generate -o payload.txt\n"
+            "  memshell probe -o payload.txt\n"
             "  memshell generate --help          # 查看全部参数说明\n"
             "  memshell install-skill --project\n"
         ),
@@ -419,6 +502,105 @@ def main(argv: list[str] | None = None) -> int:
         help="注入器全限定类名（空则服务端随机）",
     )
     p_gen.set_defaults(func=_cmd_generate)
+
+    p_probe = sub.add_parser(
+        "probe",
+        help="生成探测马（POST /api/probe/generate）",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=_PROBE_EPILOG,
+    )
+    _add_common(p_probe)
+    p_probe.add_argument(
+        "-o",
+        "--output",
+        help="只把最终 packResult 写入该文件；stdout 输出探测元信息 meta JSON（推荐）",
+    )
+    p_probe.add_argument(
+        "-m",
+        "--method",
+        default="ResponseBody",
+        help="探测方法（不区分大小写）：ResponseBody / DNSLog / Sleep（默认 ResponseBody）",
+    )
+    p_probe.add_argument(
+        "-c",
+        "--content",
+        default="Command",
+        help="探测内容（不区分大小写）：Command / Bytecode / ScriptEngine / Filter / Server / JDK…（默认 Command）",
+    )
+    p_probe.add_argument(
+        "-p",
+        "--packer",
+        default="DefaultBase64",
+        help="打包格式（DefaultBase64、GzipBase64、JSP…）",
+    )
+    p_probe.add_argument(
+        "--jre",
+        default=None,
+        help="目标 Java/JRE 发行版本：6/8/9/11/17/21/22（推荐；默认 6）",
+    )
+    p_probe.add_argument(
+        "--host",
+        default="",
+        help="DNSLog 探测用的回连域名（空则不发送）",
+    )
+    p_probe.add_argument(
+        "--seconds",
+        default="5",
+        help="Sleep 探测等待秒数（默认 5）",
+    )
+    p_probe.add_argument(
+        "--sleep-server",
+        default="Tomcat",
+        help="Sleep 探测对应的中间件（不区分大小写；默认 Tomcat）",
+    )
+    p_probe.add_argument(
+        "--server",
+        default="Tomcat",
+        help="探测内容对应的中间件（不区分大小写；默认 Tomcat）",
+    )
+    p_probe.add_argument(
+        "--req-param-name",
+        default="",
+        help="请求参数名（部分探测内容用；空则不发送）",
+    )
+    p_probe.add_argument(
+        "--command-template",
+        default="",
+        help='Command 探测的命令模板，用 {command} 占位，如 sh -c "{command}" 2>&1',
+    )
+    p_probe.add_argument(
+        "--debug",
+        action="store_true",
+        help="开启调试：打印注入信息与异常堆栈",
+    )
+    p_probe.add_argument(
+        "--by-pass-java-module",
+        dest="by_pass_java_module",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help="绕过 JDK9+ 模块限制（Unsafe defineClass）；未指定时 JRE≥9 自动 True",
+    )
+    p_probe.add_argument(
+        "--no-shrink",
+        action="store_true",
+        help="关闭缩小字节码（默认开启：ASM SKIP_DEBUG 去掉调试信息以缩短体积）",
+    )
+    p_probe.add_argument(
+        "--lambda-suffix",
+        action="store_true",
+        help="类名追加 $Proxy0$$Lambda$1 后缀，便于绕过部分主动扫描",
+    )
+    p_probe.add_argument(
+        "--no-static-initialize",
+        action="store_true",
+        help="关闭静态初始化（默认开启：静态块调构造，适配 Class.forName(..., true, ...)）",
+    )
+    p_probe.add_argument(
+        "--shell-class-name",
+        default="",
+        help="探测马全限定类名（空则服务端随机）",
+    )
+    p_probe.set_defaults(func=_cmd_probe)
 
     p_skill = sub.add_parser("install-skill", help="安装 Agent Skill 到 .agents/skills/memshell")
     p_skill.add_argument("--global", dest="global_", action="store_true", help="安装到 ~/.agents/skills/memshell")

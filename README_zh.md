@@ -389,6 +389,7 @@ CLI 工具 `memshell`（MemShellParty 内存马生成）：
 ```bash
 memshell config
 memshell generate --shell-tool Behinder --shell-type Listener -o payload.txt
+memshell probe -o payload.txt
 memshell install-skill --project   # 安装到 ./.agents/skills/memshell
 ```
 
@@ -472,7 +473,7 @@ APIHZ_IMG_KEY =
 | `wtfutil.singleinstance` | 单实例锁（`SingleInstance`、`@single_instance`） | [中文](docs/zh/singleinstance.md) · [EN](docs/en/singleinstance.md) |
 | `wtfutil.util` | 杂项工具、`get_resource`、`UniqueQueue` | [中文](docs/zh/util.md) · [EN](docs/en/util.md) |
 | **`pykill`**（CLI） | 列出/终止 Python 进程 | [中文](docs/zh/pykill.md) · [EN](docs/en/pykill.md) |
-| **`memshell`**（CLI） | MemShellParty 生成 / install-skill | [中文](docs/zh/memshellutil.md) · [EN](docs/en/memshellutil.md) |
+| **`memshell`**（CLI） | MemShellParty 生成 / probe / install-skill | [中文](docs/zh/memshellutil.md) · [EN](docs/en/memshellutil.md) |
 
 从 1.3.0 起，表中的 `wtfutil.<module>` SDK 子模块都是独立且唯一的公开 API 边界。推荐直接从所属子模块导入符号，例如 `from wtfutil.fileutil import read_text`；也可使用 `from wtfutil import fileutil` 导入物理子模块。包根不维护符号映射、懒加载或包级公开符号列表；`pykill` 与 `memshell` 两行则是控制台命令。
 

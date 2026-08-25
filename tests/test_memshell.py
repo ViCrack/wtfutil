@@ -21,11 +21,18 @@ from requests.exceptions import ConnectionError as RequestsConnectionError
 from wtfutil.memshell import main as memshell_main
 from wtfutil.memshellutil import (
     DEFAULT_BASE_URL,
+    MemShellGenerateResult,
     MemShellParty,
     MemShellPartyError,
+    ProbeContent,
+    ProbeGenerateResult,
+    ProbeMethod,
+    Server,
     _build_connect_retry,
     build_generate_body,
+    build_probe_body,
     extract_generate_meta,
+    extract_probe_meta,
     resolve_shell_credentials,
 )
 
@@ -34,6 +41,33 @@ _RUN_LIVE = os.getenv("MEMSHELL_RUN_LIVE", "").strip().lower() in {
     "true",
     "yes",
 }
+
+
+def _as_generate_result(data: dict) -> MemShellGenerateResult:
+    meta = extract_generate_meta(data)
+    return MemShellGenerateResult(
+        pack_result=data.get("packResult"),
+        all_pack_results=data.get("allPackResults"),
+        shell_class_name=meta["shellClassName"],
+        injector_class_name=meta["injectorClassName"],
+        shell_size=meta["shellSize"],
+        injector_size=meta["injectorSize"],
+        shell_config=meta["shellConfig"],
+        shell_tool_config=meta["shellToolConfig"],
+        injector_config=meta["injectorConfig"],
+    )
+
+
+def _as_probe_result(data: dict) -> ProbeGenerateResult:
+    meta = extract_probe_meta(data)
+    return ProbeGenerateResult(
+        pack_result=data.get("packResult"),
+        all_pack_results=data.get("allPackResults"),
+        shell_class_name=meta["shellClassName"],
+        shell_size=meta["shellSize"],
+        probe_config=meta["probeConfig"],
+        probe_content_config=meta["probeContentConfig"],
+    )
 
 
 def _fake_resp(data, status_code: int = 200):
@@ -234,6 +268,90 @@ class TestBuildGenerateBody(unittest.TestCase):
         self.assertTrue(body["shellConfig"]["byPassJavaModule"])
 
 
+class TestBuildProbeBody(unittest.TestCase):
+    def test_defaults(self):
+        body = build_probe_body()
+        self.assertEqual(body["probeConfig"]["probeMethod"], "ResponseBody")
+        self.assertEqual(body["probeConfig"]["probeContent"], "Command")
+        self.assertEqual(body["probeConfig"]["targetJreVersion"], 50)
+        self.assertFalse(body["probeConfig"]["byPassJavaModule"])
+        self.assertTrue(body["probeConfig"]["shrink"])
+        self.assertTrue(body["probeConfig"]["staticInitialize"])
+        self.assertFalse(body["probeConfig"]["debug"])
+        self.assertFalse(body["probeConfig"]["lambdaSuffix"])
+        self.assertEqual(body["packer"], "DefaultBase64")
+        self.assertEqual(body["probeContentConfig"]["server"], "Tomcat")
+        self.assertEqual(body["probeContentConfig"]["sleepServer"], "Tomcat")
+        self.assertEqual(body["probeContentConfig"]["seconds"], 5)
+        self.assertNotIn("host", body["probeContentConfig"])
+        self.assertNotIn("reqParamName", body["probeContentConfig"])
+
+    def test_jre9_auto_bypass_and_casefold(self):
+        body = build_probe_body(method="dnslog", content="server", jre=9, host="x.example.test")
+        self.assertEqual(body["probeConfig"]["probeMethod"], "DNSLog")
+        self.assertEqual(body["probeConfig"]["probeContent"], "Server")
+        self.assertEqual(body["probeConfig"]["targetJreVersion"], 53)
+        self.assertTrue(body["probeConfig"]["byPassJavaModule"])
+        self.assertEqual(body["probeContentConfig"]["host"], "x.example.test")
+
+    def test_script_engine_and_filter_casefold(self):
+        body = build_probe_body(content="scriptengine")
+        self.assertEqual(body["probeConfig"]["probeContent"], "ScriptEngine")
+        body2 = build_probe_body(content="filter")
+        self.assertEqual(body2["probeConfig"]["probeContent"], "Filter")
+
+    def test_rejects_bool_seconds(self):
+        with self.assertRaises((TypeError, ValueError)):
+            build_probe_body(seconds=True)
+
+    def test_omits_empty_content_fields(self):
+        body = build_probe_body(host="", req_param_name="", command_template="")
+        self.assertNotIn("host", body["probeContentConfig"])
+        self.assertNotIn("reqParamName", body["probeContentConfig"])
+        self.assertNotIn("commandTemplate", body["probeContentConfig"])
+
+    def test_body_merge_and_unknown_passthrough(self):
+        body = build_probe_body(
+            {"probeConfig": {"probeMethod": "Sleep"}, "packer": "JSP"},
+            method="ResponseBody",
+            content="NopeContent",
+        )
+        self.assertEqual(body["probeConfig"]["probeMethod"], "Sleep")
+        self.assertEqual(body["probeConfig"]["probeContent"], "NopeContent")
+        self.assertEqual(body["packer"], "JSP")
+
+    def test_rejects_non_dict_body(self):
+        with self.assertRaisesRegex(TypeError, "body must be a dictionary"):
+            build_probe_body(["not", "a", "dict"])
+
+    def test_rejects_illegal_nested_objects(self):
+        with self.assertRaisesRegex(TypeError, "body.probeConfig must be an object"):
+            build_probe_body({"probeConfig": []})
+        with self.assertRaisesRegex(TypeError, "body.probeContentConfig must be an object"):
+            build_probe_body({"probeContentConfig": "invalid"})
+
+    def test_omits_seconds_when_none(self):
+        body = build_probe_body(seconds=None)
+        self.assertNotIn("seconds", body["probeContentConfig"])
+
+    def test_jre_overrides_target_jre_version(self):
+        body = build_probe_body(jre=11, target_jre_version=8)
+        self.assertEqual(body["probeConfig"]["targetJreVersion"], 55)
+
+    def test_accepts_enums_and_casefolds_server(self):
+        body = build_probe_body(
+            method=ProbeMethod.DNS_LOG,
+            content=ProbeContent.SERVER,
+            server="tomcat",
+            sleep_server=Server.JETTY,
+            host="x.example.test",
+        )
+        self.assertEqual(body["probeConfig"]["probeMethod"], "DNSLog")
+        self.assertEqual(body["probeConfig"]["probeContent"], "Server")
+        self.assertEqual(body["probeContentConfig"]["server"], "Tomcat")
+        self.assertEqual(body["probeContentConfig"]["sleepServer"], "Jetty")
+
+
 class TestExtractGenerateMeta(unittest.TestCase):
     def test_strips_bytes_and_exposes_output(self):
         result = {
@@ -296,6 +414,120 @@ class TestExtractGenerateMeta(unittest.TestCase):
                         }
                     }
                 )
+
+
+class TestExtractProbeMeta(unittest.TestCase):
+    def test_strips_payload_and_exposes_output(self):
+        meta = extract_probe_meta(
+            {
+                "packResult": "example-pack",
+                "probeShellResult": {
+                    "shellClassName": "example.Probe",
+                    "shellSize": 12,
+                    "shellBytesBase64Str": "example-bytes",
+                    "probeConfig": {"probeMethod": "ResponseBody", "probeContent": "Command"},
+                    "probeContentConfig": {"host": "x.example.test"},
+                },
+            },
+            output="C:\\out.txt",
+        )
+        self.assertEqual(meta["shellClassName"], "example.Probe")
+        self.assertEqual(meta["shellSize"], 12)
+        self.assertTrue(meta["hasPackResult"])
+        self.assertFalse(meta["hasAllPackResults"])
+        self.assertEqual(meta["output"], "C:\\out.txt")
+        self.assertNotIn("packResult", meta)
+        self.assertNotIn("shellBytesBase64Str", meta)
+        self.assertEqual(meta["probeConfig"], {"probeMethod": "ResponseBody", "probeContent": "Command"})
+        self.assertEqual(meta["probeContentConfig"], {"host": "x.example.test"})
+
+    def test_rejects_invalid_nested_response_objects(self):
+        invalid_nested_values = (None, False, 0, "", [], "invalid")
+        for invalid_nested_value in invalid_nested_values:
+            with (
+                self.subTest(
+                    field="probeShellResult",
+                    invalid_nested_value=invalid_nested_value,
+                ),
+                self.assertRaisesRegex(TypeError, "probeShellResult must be an object"),
+            ):
+                extract_probe_meta({"probeShellResult": invalid_nested_value})
+
+            with (
+                self.subTest(
+                    field="probeConfig",
+                    invalid_nested_value=invalid_nested_value,
+                ),
+                self.assertRaisesRegex(TypeError, "probeConfig must be an object"),
+            ):
+                extract_probe_meta(
+                    {"probeShellResult": {"probeConfig": invalid_nested_value}}
+                )
+
+            with (
+                self.subTest(
+                    field="probeContentConfig",
+                    invalid_nested_value=invalid_nested_value,
+                ),
+                self.assertRaisesRegex(TypeError, "probeContentConfig must be an object"),
+            ):
+                extract_probe_meta(
+                    {"probeShellResult": {"probeContentConfig": invalid_nested_value}}
+                )
+
+    def test_redacts_nested_payload_fields(self):
+        meta = extract_probe_meta(
+            {
+                "packResult": "example-pack",
+                "probeShellResult": {
+                    "shellClassName": "example.Probe",
+                    "probeConfig": {
+                        "probeMethod": "ResponseBody",
+                        "packResult": "nested-pack",
+                        "shellBytesBase64Str": "nested-bytes",
+                        "evilBytes": "yy",
+                        "unknownExtra": "drop-me",
+                    },
+                    "probeContentConfig": {
+                        "host": {
+                            "ok": "keep",
+                            "packResult": "hidden",
+                            "shellClassBase64": "zz",
+                        },
+                        "allPackResults": "nope",
+                    },
+                },
+            }
+        )
+        self.assertEqual(meta["probeConfig"], {"probeMethod": "ResponseBody"})
+        self.assertEqual(meta["probeContentConfig"], {"host": {"ok": "keep"}})
+        self.assertNotIn("unknownExtra", meta["probeConfig"])
+        self.assertNotIn("allPackResults", meta["probeContentConfig"])
+
+    def test_accepts_probe_generate_result(self):
+        result = ProbeGenerateResult(
+            pack_result="example-pack",
+            shell_class_name="example.Probe",
+            shell_size=4,
+            probe_config={
+                "probeMethod": "Sleep",
+                "packResult": "nested-pack",
+                "unknownExtra": "drop-me",
+            },
+            probe_content_config={
+                "seconds": 5,
+                "shellClassBase64": "zz",
+            },
+        )
+        meta = extract_probe_meta(result, output="C:\\out.txt")
+        self.assertEqual(meta["shellClassName"], "example.Probe")
+        self.assertEqual(meta["probeConfig"], {"probeMethod": "Sleep"})
+        self.assertEqual(meta["probeContentConfig"], {"seconds": 5})
+        self.assertTrue(meta["hasPackResult"])
+        self.assertEqual(meta["output"], "C:\\out.txt")
+        self.assertNotIn("packResult", meta)
+        self.assertNotIn("unknownExtra", meta["probeConfig"])
+        self.assertNotIn("shellClassBase64", meta["probeContentConfig"])
 
 
 class TestMemShellPartyClient(unittest.TestCase):
@@ -417,7 +649,9 @@ class TestMemShellPartyClient(unittest.TestCase):
 
         result = client.generate(shell_tool="Behinder", behinder_pass="example-pass")
 
-        self.assertEqual(result["packResult"], "example-result")
+        self.assertIsInstance(result, MemShellGenerateResult)
+        self.assertEqual(result.pack_result, "example-result")
+        self.assertEqual(result.shell_class_name, "ExampleShell")
         args, kwargs = session.request.call_args
         self.assertEqual(args[0], "POST")
         self.assertTrue(args[1].endswith("/api/memshell/generate"))
@@ -600,31 +834,33 @@ class TestMemShellPartyClient(unittest.TestCase):
         self.assertNotIn("example-sensitive", traceback_text)
         client.close()
 
-    def test_http_error_redacts_response_body_and_server_message(self):
+    def test_http_error_includes_error_field_but_not_payload(self):
         session = mock.Mock()
         session.request.return_value = _fake_resp(
             {
-                "error": "example-sensitive-server-detail",
+                "error": "Unsupported server type: 'SpringWebFlux1'.",
                 "packResult": "example-generated-payload",
             },
-            status_code=500,
+            status_code=400,
         )
         client = MemShellParty(base_url="https://example.test", session=session)
 
         with self.assertRaises(MemShellPartyError) as ctx:
             client.get_config()
 
-        self.assertEqual(str(ctx.exception), "HTTP 500")
-        self.assertEqual(ctx.exception.status_code, 500)
+        self.assertEqual(
+            str(ctx.exception),
+            "Unsupported server type: 'SpringWebFlux1'. (HTTP 400)",
+        )
+        self.assertEqual(ctx.exception.status_code, 400)
         self.assertIsNone(ctx.exception.body)
-        self.assertNotIn("example-sensitive", str(ctx.exception))
         self.assertNotIn("example-generated-payload", str(ctx.exception))
         client.close()
 
-    def test_body_error_field_redacts_server_message(self):
+    def test_body_error_field_includes_server_message(self):
         session = mock.Mock()
         session.request.return_value = _fake_resp(
-            {"error": "example-sensitive-server-detail"},
+            {"error": "unknown shell tool Godzilla1"},
             status_code=200,
         )
         client = MemShellParty(base_url="https://example.test", session=session)
@@ -632,10 +868,82 @@ class TestMemShellPartyClient(unittest.TestCase):
         with self.assertRaises(MemShellPartyError) as ctx:
             client.generate()
 
-        self.assertEqual(str(ctx.exception), "API response reported an error (HTTP 200)")
+        self.assertEqual(str(ctx.exception), "unknown shell tool Godzilla1 (HTTP 200)")
         self.assertEqual(ctx.exception.status_code, 200)
         self.assertIsNone(ctx.exception.body)
-        self.assertNotIn("example-sensitive", str(ctx.exception))
+        client.close()
+
+    def test_generate_probe_posts_json(self):
+        session = mock.Mock()
+        session.request.return_value = _fake_resp(
+            {"packResult": "example-probe", "probeShellResult": {"shellClassName": "P"}}
+        )
+        client = MemShellParty(base_url="https://example.test/", session=session)
+        result = client.generate_probe(method="ResponseBody", content="Command")
+        self.assertIsInstance(result, ProbeGenerateResult)
+        self.assertEqual(result.pack_result, "example-probe")
+        self.assertEqual(result.shell_class_name, "P")
+        args, kwargs = session.request.call_args
+        self.assertEqual(args[0], "POST")
+        self.assertTrue(args[1].endswith("/api/probe/generate"))
+        self.assertEqual(kwargs["json"]["probeConfig"]["probeMethod"], "ResponseBody")
+        self.assertEqual(kwargs["json"]["probeConfig"]["probeContent"], "Command")
+        self.assertTrue(kwargs["json"]["probeConfig"]["shrink"])
+        client.close()
+
+    def test_generate_probe_http_error_redacts_body(self):
+        session = mock.Mock()
+        session.request.return_value = _fake_resp(
+            {"error": "example-server-secret"}, status_code=400
+        )
+        client = MemShellParty(base_url="https://example.test/", session=session)
+        with self.assertRaises(MemShellPartyError) as ctx:
+            client.generate_probe()
+        self.assertIsNone(ctx.exception.body)
+        self.assertEqual(str(ctx.exception), "example-server-secret (HTTP 400)")
+        client.close()
+
+    def test_generate_probe_rejects_non_object_response(self):
+        session = mock.Mock()
+        session.request.return_value = _fake_resp(["not", "an", "object"])
+        client = MemShellParty(base_url="https://example.test/", session=session)
+        with self.assertRaises(MemShellPartyError) as ctx:
+            client.generate_probe()
+        self.assertEqual(str(ctx.exception), "invalid JSON response (HTTP 200)")
+        self.assertEqual(ctx.exception.status_code, 200)
+        self.assertNotIn("not", str(ctx.exception))
+        client.close()
+
+    def test_generate_rejects_non_object_response(self):
+        session = mock.Mock()
+        session.request.return_value = _fake_resp(["not", "an", "object"])
+        client = MemShellParty(base_url="https://example.test/", session=session)
+        with self.assertRaises(MemShellPartyError) as ctx:
+            client.generate()
+        self.assertEqual(str(ctx.exception), "invalid JSON response (HTTP 200)")
+        self.assertEqual(ctx.exception.status_code, 200)
+        self.assertIsNone(ctx.exception.body)
+        self.assertNotIn("not", str(ctx.exception))
+        client.close()
+
+    def test_generate_wraps_invalid_nested_result(self):
+        session = mock.Mock()
+        session.request.return_value = _fake_resp({"memShellResult": []})
+        client = MemShellParty(base_url="https://example.test/", session=session)
+        with self.assertRaises(MemShellPartyError) as ctx:
+            client.generate()
+        self.assertEqual(str(ctx.exception), "invalid JSON response (HTTP 200)")
+        self.assertIsNone(ctx.exception.body)
+        client.close()
+
+    def test_generate_probe_wraps_invalid_nested_result(self):
+        session = mock.Mock()
+        session.request.return_value = _fake_resp({"probeShellResult": "invalid"})
+        client = MemShellParty(base_url="https://example.test/", session=session)
+        with self.assertRaises(MemShellPartyError) as ctx:
+            client.generate_probe()
+        self.assertEqual(str(ctx.exception), "invalid JSON response (HTTP 200)")
+        self.assertIsNone(ctx.exception.body)
         client.close()
 
 
@@ -661,7 +969,7 @@ class TestMemshellCli(unittest.TestCase):
             out = Path(td) / "payload.txt"
             with mock.patch("wtfutil.memshell.MemShellParty") as cls:
                 inst = cls.return_value
-                inst.generate.return_value = fake_result
+                inst.generate.return_value = _as_generate_result(fake_result)
                 buf = io.StringIO()
                 with mock.patch("sys.stdout", buf):
                     code = memshell_main(
@@ -693,7 +1001,7 @@ class TestMemshellCli(unittest.TestCase):
             out = Path(td) / "g.txt"
             with mock.patch("wtfutil.memshell.MemShellParty") as cls:
                 inst = cls.return_value
-                inst.generate.return_value = fake_result
+                inst.generate.return_value = _as_generate_result(fake_result)
                 with mock.patch("sys.stdout", io.StringIO()):
                     code = memshell_main(
                         [
@@ -729,7 +1037,7 @@ class TestMemshellCli(unittest.TestCase):
             out = Path(td) / "x.txt"
             with mock.patch("wtfutil.memshell.MemShellParty") as cls:
                 inst = cls.return_value
-                inst.generate.return_value = fake_result
+                inst.generate.return_value = _as_generate_result(fake_result)
                 with mock.patch("sys.stdout", io.StringIO()):
                     code = memshell_main(
                         [
@@ -775,7 +1083,7 @@ class TestMemshellCli(unittest.TestCase):
             out = Path(td) / "y.txt"
             with mock.patch("wtfutil.memshell.MemShellParty") as cls:
                 inst = cls.return_value
-                inst.generate.return_value = fake_result
+                inst.generate.return_value = _as_generate_result(fake_result)
                 with mock.patch("sys.stdout", io.StringIO()):
                     code = memshell_main(
                         ["generate", "--target-jre-version", "17", "-o", str(out)]
@@ -884,10 +1192,12 @@ class TestMemshellCli(unittest.TestCase):
             mock.patch("pathlib.Path.write_text", side_effect=file_error),
             mock.patch("sys.stderr", error_output),
         ):
-            client_class.return_value.generate.return_value = {
-                "packResult": "example-generated-payload",
-                "memShellResult": {},
-            }
+            client_class.return_value.generate.return_value = _as_generate_result(
+                {
+                    "packResult": "example-generated-payload",
+                    "memShellResult": {},
+                }
+            )
             code = memshell_main(
                 ["generate", "-o", "example-sensitive-output-path.txt"]
             )
@@ -932,7 +1242,7 @@ class TestMemshellCli(unittest.TestCase):
                 mock.patch("wtfutil.memshell.MemShellParty") as cls,
                 mock.patch("sys.stdout", io.StringIO()),
             ):
-                cls.return_value.generate.return_value = fake_result
+                cls.return_value.generate.return_value = _as_generate_result(fake_result)
                 code = memshell_main(["generate", "-o", str(out)])
             self.assertEqual(code, 0)
             data = json.loads(out.read_text(encoding="utf-8"))
@@ -955,6 +1265,121 @@ class TestMemshellCli(unittest.TestCase):
     def test_install_skill_requires_flag(self):
         code = memshell_main(["install-skill"])
         self.assertEqual(code, 2)
+
+    def test_probe_writes_pack_result(self):
+        fake = {
+            "packResult": "example-probe-pack",
+            "probeShellResult": {
+                "shellClassName": "example.Probe",
+                "shellSize": 3,
+                "probeConfig": {"probeMethod": "ResponseBody", "probeContent": "Command"},
+                "probeContentConfig": {},
+            },
+        }
+        with tempfile.TemporaryDirectory() as td:
+            out = Path(td) / "p.txt"
+            with mock.patch("wtfutil.memshell.MemShellParty") as cls:
+                inst = cls.return_value
+                inst.generate_probe.return_value = _as_probe_result(fake)
+                buf = io.StringIO()
+                with mock.patch("sys.stdout", buf):
+                    code = memshell_main(
+                        ["probe", "-m", "ResponseBody", "-c", "Command", "-o", str(out)]
+                    )
+            self.assertEqual(code, 0)
+            self.assertEqual(out.read_text(encoding="utf-8"), "example-probe-pack")
+            meta = json.loads(buf.getvalue())
+            self.assertEqual(meta["shellClassName"], "example.Probe")
+            self.assertNotIn("packResult", meta)
+            kwargs = inst.generate_probe.call_args.kwargs
+            self.assertEqual(kwargs.get("method"), "ResponseBody")
+            self.assertEqual(kwargs.get("content"), "Command")
+
+    def test_probe_error_no_traceback(self):
+        with mock.patch("wtfutil.memshell.MemShellParty") as cls:
+            inst = cls.return_value
+            inst.generate_probe.side_effect = MemShellPartyError("HTTP 400")
+            err = io.StringIO()
+            with mock.patch("sys.stderr", err):
+                code = memshell_main(["probe", "-m", "ResponseBody", "-c", "Command"])
+        self.assertEqual(code, 1)
+        message = err.getvalue()
+        self.assertEqual(message, "error: HTTP 400\n")
+        self.assertNotIn("Traceback", message)
+        self.assertNotIn("usage:", message)
+
+    def test_probe_writes_all_pack_results_fallback(self):
+        fake = {
+            "packResult": "",
+            "allPackResults": {"GzipBase64": "example-gzip-probe"},
+            "probeShellResult": {
+                "shellClassName": "example.Probe",
+                "shellSize": 3,
+                "probeConfig": {"probeMethod": "ResponseBody"},
+                "probeContentConfig": {},
+            },
+        }
+        with tempfile.TemporaryDirectory() as td:
+            out = Path(td) / "p.json"
+            with mock.patch("wtfutil.memshell.MemShellParty") as cls:
+                inst = cls.return_value
+                inst.generate_probe.return_value = _as_probe_result(fake)
+                buf = io.StringIO()
+                with mock.patch("sys.stdout", buf):
+                    code = memshell_main(["probe", "-o", str(out)])
+            self.assertEqual(code, 0)
+            data = json.loads(out.read_text(encoding="utf-8"))
+            self.assertEqual(data["GzipBase64"], "example-gzip-probe")
+            meta = json.loads(buf.getvalue())
+            self.assertTrue(meta["hasAllPackResults"])
+            self.assertNotIn("packResult", meta)
+
+    def test_probe_without_output_prints_full_json(self):
+        fake = {
+            "packResult": "example-probe-pack",
+            "probeShellResult": {
+                "shellClassName": "example.Probe",
+                "probeConfig": {"probeMethod": "ResponseBody"},
+                "probeContentConfig": {},
+            },
+        }
+        with mock.patch("wtfutil.memshell.MemShellParty") as cls:
+            inst = cls.return_value
+            inst.generate_probe.return_value = _as_probe_result(fake)
+            buf = io.StringIO()
+            with mock.patch("sys.stdout", buf):
+                code = memshell_main(["probe", "-m", "dnslog", "-c", "server"])
+        self.assertEqual(code, 0)
+        data = json.loads(buf.getvalue())
+        self.assertEqual(data["packResult"], "example-probe-pack")
+        self.assertEqual(inst.generate_probe.call_args.kwargs["method"], "dnslog")
+        self.assertEqual(inst.generate_probe.call_args.kwargs["content"], "server")
+
+    def test_probe_non_object_response_is_single_line_error(self):
+        with mock.patch("wtfutil.memshell.MemShellParty") as cls:
+            inst = cls.return_value
+            inst.generate_probe.side_effect = MemShellPartyError(
+                "invalid JSON response (HTTP 200)",
+                status_code=200,
+            )
+            err = io.StringIO()
+            with mock.patch("sys.stderr", err):
+                code = memshell_main(["probe"])
+        self.assertEqual(code, 1)
+        message = err.getvalue()
+        self.assertEqual(message, "error: invalid JSON response (HTTP 200)\n")
+        self.assertNotIn("Traceback", message)
+        self.assertNotIn("usage:", message)
+
+    def test_probe_invalid_seconds_is_single_line_error(self):
+        err = io.StringIO()
+        with mock.patch("sys.stderr", err):
+            code = memshell_main(["probe", "--seconds", "nope"])
+        self.assertEqual(code, 1)
+        message = err.getvalue()
+        self.assertEqual(message, "error: seconds must be an integer\n")
+        self.assertNotIn("Traceback", message)
+        self.assertNotIn("usage:", message)
 
 
 @unittest.skipUnless(_RUN_LIVE, "设置 MEMSHELL_RUN_LIVE=1 以运行外部联调")
@@ -986,12 +1411,10 @@ class TestMemShellPartyLive(unittest.TestCase):
                 header_value="example-token",
                 packer="DefaultBase64",
             )
-        self.assertTrue(result.get("packResult"))
-        mem = result["memShellResult"]
-        self.assertTrue(mem.get("shellClassName"))
-        self.assertTrue(mem.get("injectorClassName"))
-        tool = mem.get("shellToolConfig") or {}
-        self.assertIsInstance(tool, dict)
+        self.assertTrue(result.pack_result)
+        self.assertTrue(result.shell_class_name)
+        self.assertTrue(result.injector_class_name)
+        self.assertIsInstance(result.shell_tool_config, dict)
 
     def test_live_cli_generate_to_file(self):
         with tempfile.TemporaryDirectory() as td:

