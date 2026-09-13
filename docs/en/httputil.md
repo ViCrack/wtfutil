@@ -20,7 +20,7 @@ The legacy helpers remain available for explicit opt-in compatibility and affect
 
 Factory returning a pre-configured session (`CachedSession`, `BaseUrlSession`, or an internal enhanced session) with TLS verification disabled by default, retry adapters, and `CustomSslContextHttpAdapter` on HTTPS. The adapter applies its legacy-server TLS context to both direct and proxied HTTPS connections. Pass `verify=True` or a CA bundle path to opt into verification.
 
-`use_cache` cannot be combined with `base_url`, `debug`, or `rate_limit`; these combinations raise `ValueError` rather than silently ignoring enhancements. Providing a fixed `user_agent` does not initialize the random user-agent provider.
+`use_cache` cannot be combined with `base_url`, `debug`, or `rate_limit`; these combinations raise `ValueError` rather than silently ignoring enhancements. Providing a fixed `user_agent` does not initialize the random user-agent provider. `debug=True` prints the outgoing request before it is sent, then the response on success. Transport failures still print the request and the exception; if the exception carries a response, that is printed too.
 
 ```python
 def requests_session(

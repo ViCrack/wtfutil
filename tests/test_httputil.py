@@ -348,6 +348,100 @@ class TestHttpRaw(unittest.TestCase):
         self.assertEqual(session.request.call_args.kwargs["data"], "payload")
 
 
+class TestHttpDebug(unittest.TestCase):
+    def _debug_session(self):
+        return httputil.requests_session(debug=True, user_agent="test-agent")
+
+    def test_debug_prints_request_before_successful_response(self) -> None:
+        response = requests.Response()
+        response.status_code = 200
+        response.reason = "OK"
+        response.headers["Content-Type"] = "text/plain"
+        response._content = b"hello"
+        response.url = "https://example.test/ping"
+
+        class FakeAdapter(httputil.HTTPAdapter):
+            def send(self, request, **kwargs):
+                response.request = request
+                return response
+
+        with self._debug_session() as session:
+            session.mount("https://", FakeAdapter())
+            stdout = io.StringIO()
+            with mock.patch("sys.stdout", stdout):
+                session.post("https://example.test/ping", data="payload=1")
+
+        text = stdout.getvalue()
+        self.assertIn("HTTP Request:", text)
+        self.assertIn("HTTP Response:", text)
+        self.assertLess(text.index("HTTP Request:"), text.index("HTTP Response:"))
+        self.assertIn("POST /ping HTTP/1.1", text)
+        self.assertIn("payload=1", text)
+        self.assertIn("hello", text)
+        self.assertNotIn("HTTP Request failed:", text)
+
+    def test_debug_prints_request_when_send_fails(self) -> None:
+        class FakeAdapter(httputil.HTTPAdapter):
+            def send(self, request, **kwargs):
+                raise requests.ConnectionError("simulated-offline", request=request)
+
+        with self._debug_session() as session:
+            session.mount("https://", FakeAdapter())
+            stdout = io.StringIO()
+            with mock.patch("sys.stdout", stdout):
+                with self.assertRaises(requests.ConnectionError):
+                    session.post("https://example.test/ping", data="payload=1")
+
+        text = stdout.getvalue()
+        self.assertIn("HTTP Request:", text)
+        self.assertIn("POST /ping HTTP/1.1", text)
+        self.assertIn("payload=1", text)
+        self.assertIn("HTTP Request failed: ConnectionError", text)
+        self.assertIn("simulated-offline", text)
+        self.assertNotIn("HTTP Response:", text)
+
+    def test_debug_prints_response_when_exception_has_one(self) -> None:
+        failed = requests.Response()
+        failed.status_code = 502
+        failed.reason = "Bad Gateway"
+        failed._content = b"upstream-down"
+
+        class FakeAdapter(httputil.HTTPAdapter):
+            def send(self, request, **kwargs):
+                failed.request = request
+                exc = requests.exceptions.ChunkedEncodingError("truncated")
+                exc.response = failed
+                raise exc
+
+        with self._debug_session() as session:
+            session.mount("https://", FakeAdapter())
+            stdout = io.StringIO()
+            with mock.patch("sys.stdout", stdout):
+                with self.assertRaises(requests.exceptions.ChunkedEncodingError):
+                    session.get("https://example.test/ping")
+
+        text = stdout.getvalue()
+        self.assertIn("HTTP Request:", text)
+        self.assertIn("HTTP Request failed: ChunkedEncodingError", text)
+        self.assertIn("HTTP Response:", text)
+        self.assertIn("502", text)
+        self.assertIn("upstream-down", text)
+
+    def test_debug_off_prints_nothing_on_failure(self) -> None:
+        class FakeAdapter(httputil.HTTPAdapter):
+            def send(self, request, **kwargs):
+                raise requests.ConnectionError("simulated-offline", request=request)
+
+        with httputil.requests_session(user_agent="test-agent") as session:
+            session.mount("https://", FakeAdapter())
+            stdout = io.StringIO()
+            with mock.patch("sys.stdout", stdout):
+                with self.assertRaises(requests.ConnectionError):
+                    session.get("https://example.test/ping")
+
+        self.assertEqual(stdout.getvalue(), "")
+
+
 class TestUrlHelpers(unittest.TestCase):
     def test_url2ip_accepts_bare_hostname_and_explicit_port(self) -> None:
         with mock.patch.object(httputil, "gethostbyname", return_value="203.0.113.10") as resolver:

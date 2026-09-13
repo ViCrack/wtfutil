@@ -153,7 +153,7 @@ req = requests_session(use_cache={"cache_name": "./data/http_cache"})
 # 伪造随机 X-Forwarded-For
 req = requests_session(fake_ip=True)
 
-# debug 模式：打印完整请求/响应
+# debug 模式：发送前打印请求，成功后打印响应；失败时仍会打印请求
 req = requests_session(debug=True)
 ```
 

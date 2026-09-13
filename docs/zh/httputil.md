@@ -54,7 +54,7 @@ def requests_session(
 |------|--------|------------|
 | `proxies` | `False` | `False`/`None`：不按此处设代理。`dict`：并 `trust_env=False`。`int`：`127.0.0.1:端口`。`str`：HTTP/HTTPS 同一代理 URL。 |
 | `timeout` | `None` | 固定到每次 `request` 的默认超时。 |
-| `debug` | `False` | 打印原始请求/响应。 |
+| `debug` | `False` | 发送前打印请求行/头/体；成功后打印响应；连接失败、超时等异常仍会打印请求和异常信息，若异常带有响应再打印响应。 |
 | `base_url` | `None` | `BaseUrlSession`；请求路径开头的 `/` 会先被去除，再继续拼接到 `base_url` 的路径后。 |
 | `user_agent` | `None` | `None` 则随机 UA。 |
 | `use_cache` | `None` | `True` 或 `dict` 传给 `CachedSession`。 |

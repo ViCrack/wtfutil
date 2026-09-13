@@ -25,7 +25,6 @@ from requests.adapters import HTTPAdapter
 from requests.exceptions import JSONDecodeError
 from requests.packages.urllib3.util.ssl_ import create_urllib3_context
 from requests.utils import to_native_string
-from requests_toolbelt.utils import dump
 from rich.progress import Progress
 
 from .strutil import extract_dict, rand_base
@@ -133,6 +132,50 @@ def _enrich_json_errors(response, **_kwargs):
     return response
 
 
+_DEBUG_SEPARATOR = "-" * 50
+
+
+def _print_debug_request(request: requests.PreparedRequest) -> None:
+    print("HTTP Request:")
+    parsed = urlparse(request.url)
+    path = parsed.path or "/"
+    if parsed.query:
+        path = f"{path}?{parsed.query}"
+    print(f"> {request.method} {path} HTTP/1.1")
+    headers = request.headers.copy()
+    host = headers.pop("Host", parsed.netloc)
+    print(f"> Host: {host}")
+    for name, value in headers.items():
+        print(f"> {name}: {value}")
+    print(">")
+    body = request.body
+    if body:
+        if isinstance(body, (bytes, bytearray)):
+            print("> " + body.decode("utf-8", errors="replace"))
+        elif isinstance(body, str):
+            print("> " + body)
+        else:
+            print("<< Request body is not a string-like type >>")
+    print(_DEBUG_SEPARATOR)
+
+
+def _print_debug_response(response, **_kwargs):
+    print("HTTP Response:")
+    reason = response.reason or ""
+    print(f"< HTTP/1.1 {response.status_code} {reason}".rstrip())
+    for name, value in response.headers.items():
+        print(f"< {name}: {value}")
+    print("<")
+    content = response.content
+    if content:
+        if isinstance(content, (bytes, bytearray)):
+            print(content.decode("utf-8", errors="replace"))
+        else:
+            print(content)
+    print(_DEBUG_SEPARATOR)
+    return response
+
+
 class RequestsSession(requests.Session):
     """
     增强的 requests.Session 类，支持在请求准备和发送前通过 hook 修改请求参数。
@@ -154,6 +197,8 @@ class RequestsSession(requests.Session):
         super().__init__()
         self.hooks["response"].insert(0, _enrich_json_errors)
         self._debug = debug
+        if debug:
+            self.hooks["response"].append(_print_debug_response)
         self._timeout = timeout
         if rate_limit is not None and rate_limit <= 0:
             raise ValueError("rate_limit must be a positive number")
@@ -204,7 +249,7 @@ class RequestsSession(requests.Session):
 
     def send(self, request: requests.PreparedRequest, **kwargs) -> requests.Response:
         """
-        发送准备好的请求，应用 pre_send_hook。
+        发送准备好的请求，应用 pre_send_hook；debug 时先打印请求再发送。
 
         Args:
             request (requests.PreparedRequest): 已准备好的请求对象
@@ -216,11 +261,23 @@ class RequestsSession(requests.Session):
         for hook in self.pre_send_hooks:
             # 这里需要传递的是dict，而不能解包
             hook(request, kwargs)
-        return super().send(request, **kwargs)
+        if self._debug:
+            _print_debug_request(request)
+        try:
+            return super().send(request, **kwargs)
+        except Exception as exc:
+            if self._debug:
+                print(f"HTTP Request failed: {type(exc).__name__}: {exc}")
+                response = getattr(exc, "response", None)
+                if response is not None:
+                    _print_debug_response(response)
+                else:
+                    print(_DEBUG_SEPARATOR)
+            raise
 
     def request(self, method: str, url: str, *args, **kwargs) -> requests.Response:
         """
-        执行 HTTP 请求，支持速率限制和调试输出。
+        执行 HTTP 请求，支持速率限制。调试输出在 send() 中处理。
 
         Args:
             method (str): HTTP 方法（如 GET、POST）
@@ -239,15 +296,7 @@ class RequestsSession(requests.Session):
             if elapsed < 1.0 / self._rate_limit:
                 time.sleep(1.0 / self._rate_limit - elapsed)
             self._last_request_time = time.time()
-        # 调用父类的 request 方法
-        response = super().request(method, url, *args, **kwargs)
-        # 如果 debug 启用，使用 requests-toolbelt 的 dump 打印数据包
-        if self._debug:
-            print("HTTP Request and Response Packet:")
-            dumped_data = dump.dump_all(response, request_prefix=b"> ", response_prefix=b"< ")
-            print(dumped_data.decode('utf-8'))
-            print("-" * 50)  # 分隔符
-        return response
+        return super().request(method, url, *args, **kwargs)
 
 
 class BaseUrlSession(RequestsSession):

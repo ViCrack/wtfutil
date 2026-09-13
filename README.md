@@ -137,7 +137,7 @@ req = requests_session(use_cache={"cache_name": "./data/http_cache"})
 # Random X-Forwarded-For
 req = requests_session(fake_ip=True)
 
-# Debug mode: prints full request/response
+# Debug mode: prints the request before send, then the response (or the exception on failure)
 req = requests_session(debug=True)
 ```
 
