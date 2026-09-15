@@ -1,6 +1,10 @@
 [notify]
 # 通知配置示例，键名与 notifyutil.push_config 一致
 # FEISHU_KEY = your_key
+# 中国移动新消息（5G 消息 / 新消息ClawBot），仅中国移动号码
+# CMCC_NEWMSG_KEY = ak_example-key
+# CMCC_NEWMSG_TO =
+# CMCC_NEWMSG_WS_URL =
 
 [img]
 # 随机头像 apihz 源（可选；未配置则仅使用 loliapi / horosama）

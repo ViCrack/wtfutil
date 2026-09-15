@@ -295,6 +295,7 @@ from wtfutil.notifyutil import send
 # TG_BOT_TOKEN = 123456:xxx
 # TG_USER_ID = 88888888
 # BARK_PUSH = https://api.day.app/your_key
+# CMCC_NEWMSG_KEY = ak_example-key
 
 # Fan out to all configured channels concurrently
 send("Scraper error", "Target site returned 403, pausing for 5 minutes")
@@ -305,10 +306,11 @@ Changing values in `push_config` at runtime does not rebuild the enabled-channel
 Call a single channel directly:
 
 ```python
-from wtfutil.notifyutil import feishu_bot, telegram_bot
+from wtfutil.notifyutil import cmcc_newmsg, feishu_bot, telegram_bot
 
 feishu_bot("Alert", "Disk usage exceeded 90%")
 telegram_bot("Alert", "Disk usage exceeded 90%")
+cmcc_newmsg("Alert", "Disk usage exceeded 90%")
 ```
 
 ---
@@ -433,6 +435,7 @@ SMTP_SERVER =
 SMTP_EMAIL =
 SMTP_PASSWORD =
 WEBHOOK_URL =
+CMCC_NEWMSG_KEY =
 
 [img]
 APIHZ_IMG_ID =

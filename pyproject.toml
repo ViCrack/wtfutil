@@ -44,6 +44,7 @@ dependencies = [
     "portalocker",
     "psutil",
     "questionary",
+    "websocket-client",
 ]
 
 [project.urls]

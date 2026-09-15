@@ -89,7 +89,7 @@ session = httputil.requests_session()
 - `wtfutil/notifyutil.py`
   - 多通道通知：
     - 聚合方法：`send(title, content)`，将同一条消息并发发送到所有已配置通道。
-    - 常用通道：Bark、钉钉、飞书、Telegram、SMTP、ShowDoc、自定义 Webhook 等。
+    - 常用通道：Bark、钉钉、飞书、Telegram、SMTP、ShowDoc、自定义 Webhook、中国移动新消息（`cmcc_newmsg`，`websocket-client` 短连接）等。
     - `push_config`：经 `configutil.ensure_section`（`[notify]`）；`send` 前刷新，mtime 变则重建通道列表。
     - **不在模块级添加任何 logging Handler**（符合库规范，由调用方配置）。
 

@@ -310,6 +310,7 @@ from wtfutil.notifyutil import send
 # TG_BOT_TOKEN = 123456:xxx
 # TG_USER_ID = 88888888
 # BARK_PUSH = https://api.day.app/your_key
+# CMCC_NEWMSG_KEY = ak_example-key
 
 # 一句话并发推到所有已配置通道
 send("爬虫异常", "目标站点返回 403，已暂停 5 分钟")
@@ -320,10 +321,11 @@ send("爬虫异常", "目标站点返回 403，已暂停 5 分钟")
 也可单独调用某个通道：
 
 ```python
-from wtfutil.notifyutil import feishu_bot, telegram_bot
+from wtfutil.notifyutil import cmcc_newmsg, feishu_bot, telegram_bot
 
 feishu_bot("告警", "磁盘使用率超过 90%")
 telegram_bot("告警", "磁盘使用率超过 90%")
+cmcc_newmsg("告警", "磁盘使用率超过 90%")
 ```
 
 ---
@@ -443,6 +445,7 @@ SMTP_SERVER =
 SMTP_EMAIL =
 SMTP_PASSWORD =
 WEBHOOK_URL =
+CMCC_NEWMSG_KEY =
 
 [img]
 APIHZ_IMG_ID =

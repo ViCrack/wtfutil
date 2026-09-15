@@ -12,10 +12,12 @@ import smtplib
 import threading
 import time
 import urllib.parse
+import uuid
 from email.header import Header
 from email.mime.text import MIMEText
 from email.utils import formataddr
 
+import websocket
 from requests import Session
 
 from .configutil import ensure_section
@@ -103,8 +105,8 @@ _PUSH_DEFAULTS = {
     'CHAT_URL': '',  # synology chat url
     'CHAT_TOKEN': '',  # synology chat token
 
-    'PUSH_PLUS_TOKEN': '',  # push+ 微信推送的用户令牌
-    'PUSH_PLUS_USER': '',  # push+ 微信推送的群组编码
+    'PUSH_PLUS_TOKEN': '',  # push+（推送加）用户令牌；需收费实名认证才可用，不推荐优先使用
+    'PUSH_PLUS_USER': '',  # push+（推送加）群组编码；同样受实名门槛限制，不推荐优先使用
 
     'QMSG_KEY': '',  # qmsg 酱的 QMSG_KEY
     'QMSG_TYPE': '',  # qmsg 酱的 QMSG_TYPE
@@ -149,9 +151,20 @@ _PUSH_DEFAULTS = {
     'AIOPS_KEY': '',  # aiops 机器人的 key，发手机
     'SHOWDOC_KEY': '',  # SHOWDOC https://push.showdoc.com.cn/#/push
     'NOTIFYX_KEY': '',  # https://notifyx.cn/console/dashboard
+    'CMCC_NEWMSG_KEY': '',  # 中国移动新消息 Channel API Key，ak_ 或 app_ 开头
+    'CMCC_NEWMSG_TO': '',  # 可选；5G 消息会话对端 id，不填则用入站 from / Key
+    'CMCC_NEWMSG_WS_URL': '',  # 可选；默认官方 wss://5gvas01.cmicmaap.com/gtw-ai/openclaw/ws/msg
 }
 push_config = dict(_PUSH_DEFAULTS)
 notify_function = []
+_CMCC_WS_URL = "wss://5gvas01.cmicmaap.com/gtw-ai/openclaw/ws/msg"
+_CMCC_AUTH_TIMEOUT = 10.0
+_CMCC_INBOUND_WAIT = 2.0
+_CMCC_ACK_WAIT = 1.0
+_CMCC_CLOSE_TIMEOUT = 0.5
+_cmcc_last_to = ""
+_cmcc_last_key = ""
+_cmcc_last_to_lock = threading.Lock()
 
 
 def bark(title: str, content: str) -> None:
@@ -449,7 +462,9 @@ def chat(title: str, content: str) -> None:
 
 def pushplus_bot(title: str, content: str) -> None:
     """
-    通过 push+ 推送消息。
+    通过 push+（推送加）推送消息。
+
+    该服务需收费实名认证后才能使用，不推荐作为优先通知通道。
     """
     if not push_config.get("PUSH_PLUS_TOKEN"):
         logger.error("PUSHPLUS 服务的 PUSH_PLUS_TOKEN 未设置!!")
@@ -856,6 +871,118 @@ def showdoc(title: str, content: str) -> None:
         logger.error(f"showdoc 推送失败！{response.status_code} {response.text}")
 
 
+def _cmcc_inbound_from(message: dict) -> str:
+    if message.get("type") not in {"message", "text_message", "media_message"}:
+        return ""
+    peer = message.get("from")
+    return peer.strip() if isinstance(peer, str) and peer.strip() else ""
+
+
+def _cmcc_recv_json(ws, timeout: float) -> dict | None:
+    if timeout <= 0:
+        return None
+    ws.settimeout(timeout)
+    try:
+        raw = ws.recv()
+    except websocket.WebSocketTimeoutException:
+        return None
+    try:
+        message = json.loads(raw if isinstance(raw, str) else raw.decode("utf-8"))
+    except (TypeError, UnicodeDecodeError, json.JSONDecodeError):
+        return None
+    return message if isinstance(message, dict) else None
+
+
+def _cmcc_key_enabled(value: object) -> str:
+    api_key = str(value or "").strip()
+    return api_key if api_key.startswith(("ak_", "app_")) else ""
+
+
+def cmcc_newmsg(title: str, content: str) -> None:
+    """
+    通过中国移动新消息（5G 消息 / 新消息ClawBot）推送。
+
+    底层是官方双向 WSS（websocket-client 短连接）；本通道只发一条文本后断开。
+    未配置会话 to 时会短等入站消息，用其中的 from 作为对端。不是常驻聊天机器人。
+    """
+    global _cmcc_last_to, _cmcc_last_key
+    raw_key = str(push_config.get("CMCC_NEWMSG_KEY") or "").strip()
+    if not raw_key:
+        logger.error("中国移动新消息的 CMCC_NEWMSG_KEY 未设置!!")
+        raise ValueError("中国移动新消息的 CMCC_NEWMSG_KEY 未设置!!")
+    api_key = _cmcc_key_enabled(raw_key)
+    if not api_key:
+        logger.error("中国移动新消息的 CMCC_NEWMSG_KEY 格式无效")
+        raise ValueError("中国移动新消息的 CMCC_NEWMSG_KEY 必须以 ak_ 或 app_ 开头")
+    logger.debug("中国移动新消息服务启动")
+    configured_to = str(push_config.get("CMCC_NEWMSG_TO") or "").strip()
+    ws_url = str(push_config.get("CMCC_NEWMSG_WS_URL") or "").strip() or _CMCC_WS_URL
+    with _cmcc_last_to_lock:
+        cached_to = _cmcc_last_to if _cmcc_last_key == api_key else ""
+    inbound = ""
+    ws = websocket.create_connection(
+        ws_url,
+        header=[f"X-API-Key: {api_key}"],
+        timeout=15,
+    )
+    try:
+        ws.send(json.dumps({"type": "auth", "apiKey": api_key, "version": "2.0"}, ensure_ascii=False))
+        auth_ok = False
+        deadline = time.monotonic() + _CMCC_AUTH_TIMEOUT
+        while time.monotonic() < deadline:
+            message = _cmcc_recv_json(ws, deadline - time.monotonic())
+            if message is None:
+                continue
+            inbound = _cmcc_inbound_from(message) or inbound
+            msg_type = message.get("type")
+            if msg_type == "auth_ok":
+                auth_ok = True
+                break
+            if msg_type == "auth_failed":
+                raise RuntimeError("中国移动新消息认证失败")
+        if not auth_ok:
+            raise RuntimeError("中国移动新消息认证超时")
+        if not (configured_to or cached_to or inbound):
+            extra = time.monotonic() + _CMCC_INBOUND_WAIT
+            while time.monotonic() < extra:
+                message = _cmcc_recv_json(ws, extra - time.monotonic())
+                if message is None:
+                    continue
+                if message.get("type") == "auth_failed":
+                    raise RuntimeError("中国移动新消息认证失败")
+                inbound = _cmcc_inbound_from(message) or inbound
+                if inbound:
+                    break
+        ws.send(json.dumps({
+            "type": "send",
+            "apiKey": api_key,
+            "to": configured_to or inbound or cached_to or api_key,
+            "content": f"{title}\n\n{content}" if title else content,
+            "messageId": f"msg_{int(time.time() * 1000)}_{uuid.uuid4().hex[:8]}",
+        }, ensure_ascii=False))
+        ack_deadline = time.monotonic() + _CMCC_ACK_WAIT
+        while time.monotonic() < ack_deadline:
+            message = _cmcc_recv_json(ws, ack_deadline - time.monotonic())
+            if message is None:
+                continue
+            inbound = _cmcc_inbound_from(message) or inbound
+            msg_type = message.get("type")
+            if msg_type in {"auth_failed", "error", "send_failed"}:
+                raise RuntimeError("中国移动新消息发送失败")
+            if msg_type in {"send_ok", "sent", "send_success"}:
+                break
+    finally:
+        try:
+            ws.close(timeout=_CMCC_CLOSE_TIMEOUT)
+        except Exception:
+            pass
+    if inbound:
+        with _cmcc_last_to_lock:
+            _cmcc_last_to = inbound
+            _cmcc_last_key = api_key
+    logger.debug("中国移动新消息推送成功")
+
+
 def notifyx(title: str, content: str, description=None) -> None:
     """
     使用 notifyx 推送消息。
@@ -1105,6 +1232,8 @@ def _rebuild_notify_functions() -> None:
         notify_function.append(showdoc)
     if push_config.get("NOTIFYX_KEY"):
         notify_function.append(notifyx)
+    if _cmcc_key_enabled(push_config.get("CMCC_NEWMSG_KEY")):
+        notify_function.append(cmcc_newmsg)
 
 
 def _ensure_push_config(*, force_reload: bool = False) -> bool:
@@ -1197,6 +1326,7 @@ __all__ = [
     'aiops_phone',
     'showdoc',
     'notifyx',
+    'cmcc_newmsg',
     'chronocat',
     'custom_notify',
     'one',
