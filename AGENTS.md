@@ -113,7 +113,7 @@ session = httputil.requests_session()
 - `wtfutil/daydaymaputil.py`
   - DayDayMap SDK：`DayDayMapClient.count()` 固定匿名聚合优先；不可用且有 Key 时自动用单行 API 计数（可能扣积分）。
   - Key 池、聚合计数、分桶和资产去重辅助逻辑位于本文件。
-  - `find_key_file()` 按工作目录、`resource/`、用户目录寻找第一份 `daydaymap_keys.txt`；`load_keys()` 和 `from_key_file()` 可省略路径启用发现。SDK 不读 CLI 凭证环境变量，普通构造器不自动加载文件。
+  - `find_key_file()` 通过 `util.get_resource('daydaymap_keys.txt')` 查找：当前工作目录、从该目录向上的 `resource/daydaymap_keys.txt`、用户目录；`load_keys()` 和 `from_key_file()` 可省略路径启用发现。SDK 不读 CLI 凭证环境变量，普通构造器不自动加载文件。
   - `search()` 流式分页，外部 Key 文件加载和轮询；2001/2003/2004 换 Key 重试同页，2005 仅标记窗口截断。聚合计数始终标记估算，`ip_num` 不当成资产总量。
   - `max_effort` 一层聚合拆分及资产去重，不保证完整；配额状态仅客户端生命周期有效，无数据库依赖。
   - `build_query()` 始终添加 `ip.tag!="蜜罐"`，原查询带括号；`is_china`（大陆排除港澳台）/`is_domain` 可选，默认不限制地域/域名/IPv4。免费聚合、回退、分页与拆分均保留过滤，不能保证排除未标记蜜罐。
@@ -125,7 +125,7 @@ session = httputil.requests_session()
   - **CLI 实现模块**（`daydaymap=wtfutil.daydaymap:main`），只导出 `main`，SDK 符号从 `daydaymaputil` 导入。
   - 扁平入口默认搜索，`--count` 计数；位置参数 `search` / `count` 不作为查询词（如需查同名字面量使用 `-q count`）。`--count` 显式搭配 `--fields`/`--exclude-fields`/`--page-size`/`--limit`/`--max-effort`/`--max-effort-depth`/`--format`/`--quiet` 也在请求前报错；单独的 `--max-effort-depth` 没有意义，同样拒绝。凭证优先级：重复的 `--key-file` > `DAYDAYMAP_KEY_FILE` > `DAYDAYMAP_API_KEY` > 自动发现的 `daydaymap_keys.txt`。只用首个来源；不依赖 INI 段。
   - 无显式来源且 stdin 非终端时自动逐行读取；混合输入使用 `--query-file -`。UTF-8/BOM/注释/顺序去重，模板仅支持双引号内的 `{}` 并转义输入。图标和证书只解析一次，与各查询 AND 组合。
-  - 计数免费优先、有 Key 时允许 API 回退（可能扣积分）。stdout 为 JSONL/URL 数据，stderr 为预检/摘要/错误；截断 4，Key 耗尽 3，中断 130，正常断管 0（含 Windows EINVAL）。输出打开前保护所有命名输入文件和同文件链接，并验证来源。`-o -` 表示 stdout。
+  - 计数免费优先、有 Key 时允许 API 回退（可能扣积分）。stdout 为 JSONL/URL 数据，stderr 为预检/摘要/错误；截断 4，Key 耗尽 3，中断 130，正常断管 0（含 Windows EINVAL）。`-o` 文件先读取已有行再追加，跳过重复行，不覆盖原内容。输出打开前保护所有命名输入文件和同文件链接，并验证来源。`-o -` 表示 stdout。
 
 - `wtfutil/imgutil.py`
   - 随机头像拉取（多源回退）：

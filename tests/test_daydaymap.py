@@ -188,6 +188,8 @@ class KeyFileCase(ClientCase):
         self.work.mkdir()
         (self.work / 'resource').mkdir()
         self.home.mkdir()
+        self.addCleanup(os.chdir, os.getcwd())
+        os.chdir(self.work)
         self.enterContext(mock.patch('pathlib.Path.cwd', return_value=self.work))
         self.enterContext(mock.patch('pathlib.Path.home', return_value=self.home))
 
@@ -503,6 +505,18 @@ class TestCLI(KeyFileCase):
             text = output.read_text(encoding='utf-8')
         self.assertEqual((code, out, text), (0, '', 'https://[2001:db8::1]:8443\n'))
 
+    def test_output_file_appends_existing_lines_without_duplicates(self):
+        output = self.work / 'urls.txt'
+        output.write_text('http://192.0.2.1\nkept\n', encoding='utf-8')
+        code, out, _ = self.invoke(
+            ['x', '--format', 'url', '-o', str(output), '--interval', '0'],
+            api=[page([row(1), row(1), row(2)], 3)], web=[agg(3)],
+            environ={'DAYDAYMAP_API_KEY': 'example-a'},
+        )
+        self.assertEqual(code, 0)
+        self.assertEqual(out, '')
+        self.assertEqual(output.read_text(encoding='utf-8'), 'http://192.0.2.1\nkept\nhttp://192.0.2.2\n')
+
     def test_invalid_options_fail_without_network(self):
         for argv in (['x', '--limit', '-1'], ['x', '--page-size', '10001'],
                      ['--count', 'x', '--timeout', 'nan'], ['--count']):
@@ -544,6 +558,19 @@ class TestCLI(KeyFileCase):
         code, _, _ = self.invoke(['x', '--interval', '0'], api=[page([], 0)], web=[agg(0)])
         self.assertEqual(code, 0)
         self.assertEqual(self.api.calls[0]['headers']['api-key'], 'example-home')
+
+    def test_nested_directory_finds_parent_resource_key_file(self):
+        nested = self.work / 'nested'
+        nested.mkdir()
+        (self.work / 'resource' / 'daydaymap_keys.txt').write_text('example-parent-resource\n', encoding='utf-8')
+        (self.home / 'daydaymap_keys.txt').write_text('example-home\n', encoding='utf-8')
+        with mock.patch('pathlib.Path.cwd', return_value=nested):
+            original = os.getcwd()
+            os.chdir(nested)
+            try:
+                self.assertEqual(load_keys(), ['example-parent-resource'])
+            finally:
+                os.chdir(original)
 
     def test_environment_file_precedes_environment_key_and_defaults(self):
         (self.work / 'daydaymap_keys.txt').write_text('example-default\n', encoding='utf-8')
@@ -677,7 +704,12 @@ class TestCLI(KeyFileCase):
                 else:
                     argv.append('x')
                 with mock.patch('pathlib.Path.cwd', return_value=root):
-                    code, _, _ = self.invoke(argv, web=[agg(1)])
+                    original = os.getcwd()
+                    os.chdir(root)
+                    try:
+                        code, _, _ = self.invoke(argv, web=[agg(1)])
+                    finally:
+                        os.chdir(original)
                 self.assertEqual(source.read_text(encoding='utf-8'), text)
                 self.assertEqual(code, 2)
                 self.assertEqual(self.api.calls + self.web.calls, [])

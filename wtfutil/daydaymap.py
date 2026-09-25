@@ -13,6 +13,7 @@ from contextlib import ExitStack
 from itertools import chain
 from pathlib import Path
 
+from .fileutil import read_lines
 from .daydaymaputil import (
     DayDayMapClient, DayDayMapError, _fields, find_key_file, load_keys,
     query_from_certificate, query_from_icon,
@@ -64,8 +65,8 @@ def _parser():
     parser.add_argument('--query-file', action='append', default=[], metavar='FILE', help='UTF-8 文件，一行一条；- 读取 stdin，可重复')
     parser.add_argument('--template', help='如 domain="{}"；{} 必须位于双引号内，输入值自动转义')
     parser.add_argument('--key-file', action='append', default=[], metavar='FILE',
-                        help='一行一个 Key，可重复；默认依次查找当前目录、resource/、用户目录的 daydaymap_keys.txt')
-    parser.add_argument('-o', '--output', metavar='FILE', help='覆盖 UTF-8 输出文件；默认或 - 为 stdout')
+                        help='一行一个 Key，可重复；默认按 get_resource 查找 daydaymap_keys.txt：当前目录、上级 resource/、用户目录')
+    parser.add_argument('-o', '--output', metavar='FILE', help='追加写入 UTF-8 文件，并跳过已有行；默认或 - 为 stdout')
     parser.add_argument('--timeout', type=_float_range(), default=30, help='单请求超时秒数（默认 30）')
     parser.add_argument('--interval', type=_float_range(True), default=0.5, help='请求间隔秒数（默认 0.5）')
     parser.add_argument('--max-retries', type=_int_range(0, 20), default=2, help='连接超时/429/2006 额外重试次数（默认 2）')
@@ -226,12 +227,23 @@ def _closed_stdout(exc, stream):
     return False
 
 
-def _emit(data, stream, *, url=False):
+def _output_line(data, *, url=False):
+    if url:
+        return _url(data)
+    return json.dumps(data, ensure_ascii=False, separators=(',', ':'))
+
+
+def _emit(data, stream, *, url=False, seen=None, needs_break=None):
     try:
-        if url:
-            print(_url(data), file=stream, flush=True)
-        else:
-            _json(data, stream)
+        line = _output_line(data, url=url)
+        if seen is not None:
+            if line in seen:
+                return
+            seen.add(line)
+        if needs_break is not None and needs_break[0]:
+            stream.write('\n')
+            needs_break[0] = False
+        print(line, file=stream, flush=True)
     except OSError as exc:
         if _closed_stdout(exc, stream):
             raise _OutputClosed from None
@@ -311,7 +323,7 @@ def main(argv: list[str] | None = None) -> int:
             inputs.append(args.icon_file)
         _protect_inputs(args.output, inputs)
         with ExitStack() as stack:
-            # Open every named input before truncating output, but never read it all.
+            # Open every named input before appending output, but never read it all.
             streams = [sys.stdin if path == '-' else stack.enter_context(
                 Path(path).expanduser().open(encoding='utf-8-sig')) for path in dict.fromkeys(args.query_file)]
             has_source = any(value is not None for value in (args.icon_file, args.icon_url, args.cert_url))
@@ -329,8 +341,19 @@ def main(argv: list[str] | None = None) -> int:
                 sources.append(query_from_icon(args.icon_file, url=args.icon_url, timeout=args.timeout, proxy=args.proxy))
             if args.cert_url is not None:
                 sources.append(query_from_certificate(args.cert_url, timeout=args.timeout, proxy=args.proxy))
-            stream = stack.enter_context(Path(args.output).expanduser().open('w', encoding='utf-8', newline='\n')) \
-                if args.output and args.output != '-' else sys.stdout
+            seen = None
+            needs_break = None
+            if args.output and args.output != '-':
+                destination = Path(args.output).expanduser()
+                seen = set(read_lines(destination, not_exists_ok=True))
+                needs_break = [False]
+                if destination.is_file() and destination.stat().st_size:
+                    with destination.open('rb') as existing:
+                        existing.seek(-1, os.SEEK_END)
+                        needs_break[0] = existing.read(1) not in b'\r\n'
+                stream = stack.enter_context(destination.open('a', encoding='utf-8', newline='\n'))
+            else:
+                stream = sys.stdout
             status = 0
             filters = dict(is_china=args.is_china, is_domain=args.is_domain)
             on_count = None if args.quiet else lambda result: _json({'type': 'count', **result.to_dict()}, sys.stderr)
@@ -339,13 +362,13 @@ def main(argv: list[str] | None = None) -> int:
                     clauses = ([query] if query is not None else []) + sources
                     query = ' && '.join(f'({clause})' for clause in clauses)
                 if args.count:
-                    _emit(client.count(query, **filters).to_dict(), stream)
+                    _emit(client.count(query, **filters).to_dict(), stream, seen=seen, needs_break=needs_break)
                     continue
                 iterator = client.search(query, **_search_kwargs(args), **filters, on_count=on_count)
                 broken = False
                 try:
                     for asset in iterator:
-                        _emit(asset, stream, url=args.format == 'url')
+                        _emit(asset, stream, url=args.format == 'url', seen=seen, needs_break=needs_break)
                 except _OutputClosed:
                     broken = True
                     raise

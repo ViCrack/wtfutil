@@ -64,7 +64,7 @@ Usage: `daydaymap [QUERY] [options]`. Search is the default; `--count` outputs c
 | `--is-china` | Mainland-China clauses excluding Hong Kong/Macao/Taiwan; off by default |
 | `--is-domain` | Add `is_domain="true"`; off by default |
 | `--key-file FILE` | External key file; repeatable |
-| `-o FILE` / `--output FILE` | Overwrite UTF-8 output; omitted or `-` means stdout |
+| `-o FILE` / `--output FILE` | Append UTF-8 output after reading existing lines and skipping duplicates; omitted or `-` means stdout |
 | `--timeout N` | Per-request timeout, >0 seconds; default 30 |
 | `--interval N` | SDK request interval, >=0; default 0.5 seconds |
 | `--max-retries N` | Extra connect-timeout/429/2006 retries, 0..20; default 2 |
@@ -85,13 +85,13 @@ Explicit `--fields`, `--exclude-fields`, `--page-size`, `--limit`, `--max-effort
 
 Process the positional query, repeated `-q` values, then query files in their specified order. Files/stdin ignore a first-line BOM, blank lines and whole-line `#` comments. Query deduplication preserves first occurrence; its set grows with distinct queries, but whole files are never loaded up front. Repeated `--query-file -` consumes stdin once.
 
-Stdin is automatic only when it is not a terminal and there is no explicit positional query, `-q`, query file, icon or certificate. Use `--query-file -` to combine a pipe with explicit sources. Each query runs before the next line is read, without waiting for EOF. Counts, records and summaries are per query; totals are not combined, and assets are not deduplicated across separate inputs.
+Stdin is automatic only when it is not a terminal and there is no explicit positional query, `-q`, query file, icon or certificate. Use `--query-file -` to combine a pipe with explicit sources. Each query runs before the next line is read, without waiting for EOF. Counts, records and summaries are per query; totals are not combined. Stdout does not deduplicate across inputs. File output is read first and appended, so an identical line is never written twice.
 
 Templates apply to positional, `-q` and line-based inputs. `domain="{}" || cert.subject.cn="{}"` inserts the same escaped value twice. Escape backslashes to `\\` first, then double quotes to `\"`. Missing placeholders, unknown braces, placeholders outside quotes, unclosed quotes and backslash-escaped placeholders fail locally.
 
 Icons/certificates are resolved once and AND-combined with every parenthesized query. Without a text source, fingerprints work alone; two fingerprints are also AND-combined. An explicitly supplied but empty text source is an error rather than a fallback to a broader fingerprint query.
 
-Before opening output, the CLI validates keys, options, all named query files and path collisions, and resolves fingerprints. Output cannot overwrite a used key, query or icon file, including symbolic or hard links. Regular files redirected into stdin are also protected by filesystem identity. Missing files, empty input, invalid templates and source failures preserve existing output. Errors after streaming begins retain partial output. `--key-file -` refers to a literal file named `-`, whereas `-o -` always means stdout.
+Before opening output, the CLI validates keys, options, all named query files and path collisions, and resolves fingerprints. Output cannot overwrite a used key, query or icon file, including symbolic or hard links. Regular files redirected into stdin are also protected by filesystem identity. Missing files, empty input, invalid templates and source failures preserve existing output. File output is append-only and never truncates existing content. Errors after streaming begins retain partial output. `--key-file -` refers to a literal file named `-`, whereas `-o -` always means stdout.
 
 ## Query filters
 
@@ -127,7 +127,7 @@ example-key-a
 example-key-b
 ```
 
-CLI precedence: repeated `--key-file` paths → one `DAYDAYMAP_KEY_FILE` → one `DAYDAYMAP_API_KEY` → the first discovered `daydaymap_keys.txt`. Discovery checks the working directory, its `resource/` directory, then the user home. Lower-priority sources are not mixed in. An empty, invalid or unreadable first file does not fall through. Without keys, free counts can still work; search exits 2. The default key filename is gitignored.
+CLI precedence: repeated `--key-file` paths → one `DAYDAYMAP_KEY_FILE` → one `DAYDAYMAP_API_KEY` → the first discovered `daydaymap_keys.txt`. Discovery uses `get_resource('daydaymap_keys.txt')`: the working directory, `resource/daydaymap_keys.txt` found by walking upward, then the user home. Lower-priority sources are not mixed in. An empty, invalid or unreadable first file does not fall through. Without keys, free counts can still work; search exits 2. The default key filename is gitignored.
 
 The SDK does not read these CLI credential environment variables. `load_keys()` and `DayDayMapClient.from_key_file()` can discover files; the ordinary constructor does not. Credential loading does not use an INI section, database or browser cookies.
 

@@ -25,6 +25,7 @@ from requests.exceptions import ConnectTimeout, RequestException
 from requests.utils import get_environ_proxies, select_proxy
 
 from .httputil import requests_session
+from .util import get_resource
 
 DEFAULT_BASE_URL = 'https://www.daydaymap.com'
 API_LIMIT = 10000
@@ -277,13 +278,9 @@ def _clean_keys(keys):
 
 
 def find_key_file() -> Path | None:
-    """Find the first daydaymap_keys.txt in cwd, cwd/resource, then the user home."""
-    work = Path.cwd()
-    for path in (work / 'daydaymap_keys.txt', work / 'resource' / 'daydaymap_keys.txt'):
-        if path.is_file():
-            return path
-    path = Path.home() / 'daydaymap_keys.txt'
-    return path if path.is_file() else None
+    """Find daydaymap_keys.txt via get_resource: cwd, ancestor resource/, then home."""
+    found = get_resource('daydaymap_keys.txt', basedir=Path.cwd())
+    return Path(found) if found else None
 
 
 def load_keys(path: str | Path | None = None) -> list[str]:
