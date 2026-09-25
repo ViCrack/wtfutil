@@ -397,6 +397,18 @@ memshell install-skill --project   # 安装到 ./.agents/skills/memshell
 
 详情见 [docs/zh/memshellutil.md](docs/zh/memshellutil.md)。
 
+CLI 工具 `daydaymap`（默认搜索、`--count` 计数，支持流式管道和多 Key）：
+
+```bash
+daydaymap --count 'domain="example.com"'
+daydaymap 'domain="example.com"' --is-china --is-domain --fields ip,port,domain,url -o assets.jsonl
+printf '%s\n' example.com example.org | daydaymap --template 'domain="{}"' --format url
+daydaymap --icon-file favicon.ico --key-file custom-keys.txt
+daydaymap --cert-url https://example.com:8443 --proxy http://127.0.0.1:8080
+```
+
+所有查询强制排除平台已标记蜜罐，无法保证识别未标记蜜罐；地域和域名限制需显式启用。Key 文件一行一个，依次发现工作目录、`resource/`、用户目录的第一份 `daydaymap_keys.txt`；显式文件和环境变量优先。积分不足换 Key 重试同页。计数免费聚合优先，失败且有 Key 时可能付费回退；搜索预检不额外付费计数。JSONL/URL 结果写 stdout，预检和摘要写 stderr。默认搜索，使用 `--count` 计数；裸位置词 `search` / `count` 不作为查询输入，要查询同名字面量请用 `-q`。`--count` 不能显式搭配搜索专用参数。可用 `python -m wtfutil.daydaymap`。完整参数、PowerShell 示例及 SDK：[docs/zh/daydaymaputil.md](docs/zh/daydaymaputil.md)。
+
 ---
 
 ## 杂项工具 — `util`
@@ -472,6 +484,7 @@ APIHZ_IMG_KEY =
 | `wtfutil.notifyutil` | 多通道通知推送 | [中文](docs/zh/notifyutil.md) · [EN](docs/en/notifyutil.md) |
 | `wtfutil.translateutil` | 百度翻译 API | [中文](docs/zh/translateutil.md) · [EN](docs/en/translateutil.md) |
 | `wtfutil.memshellutil` | MemShellParty 内存马生成 SDK | [中文](docs/zh/memshellutil.md) · [EN](docs/en/memshellutil.md) |
+| `wtfutil.daydaymaputil` / **`daydaymap`** | 免费聚合计数、精确 API 查询、Key 文件与轮询、JSONL/URL 输出 | [中文](docs/zh/daydaymaputil.md) · [EN](docs/en/daydaymaputil.md) |
 | `wtfutil.imgutil` | 随机头像拉取（多源回退） | [中文](docs/zh/imgutil.md) · [EN](docs/en/imgutil.md) |
 | `wtfutil.singleinstance` | 单实例锁（`SingleInstance`、`@single_instance`） | [中文](docs/zh/singleinstance.md) · [EN](docs/en/singleinstance.md) |
 | `wtfutil.util` | 杂项工具、`get_resource`、`UniqueQueue` | [中文](docs/zh/util.md) · [EN](docs/en/util.md) |

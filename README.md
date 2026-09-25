@@ -387,6 +387,18 @@ memshell install-skill --project   # install to ./.agents/skills/memshell
 
 Details: [docs/en/memshellutil.md](docs/en/memshellutil.md)
 
+`daydaymap` CLI (default search, `--count`, streaming pipes and rotating keys):
+
+```bash
+daydaymap --count 'domain="example.com"'
+daydaymap 'domain="example.com"' --is-china --is-domain --fields ip,port,domain,url -o assets.jsonl
+printf '%s\n' example.com example.org | daydaymap --template 'domain="{}"' --format url
+daydaymap --icon-file favicon.ico --key-file custom-keys.txt
+daydaymap --cert-url https://example.com:8443 --proxy http://127.0.0.1:8080
+```
+
+All queries exclude platform-labelled honeypots; unlabelled honeypots cannot be guaranteed absent. Region/domain restrictions are opt-in. Key files contain one key per line; discovery selects the first `daydaymap_keys.txt` in the working directory, `resource/`, then the user home. Explicit files and environment variables take precedence. Insufficient credits rotate to the next key and retry the same page. Counts prefer free aggregation, with a potentially billed API fallback; search preflight adds no paid count probe. Data goes to stdout, counts/summaries to stderr. Search is the default; use `--count` for counts. Bare positional `search`/`count` are invalid queries; to query these literal words use `-q search` / `-q count`. Explicit search-only options cannot be combined with `--count`. Also available as `python -m wtfutil.daydaymap`. Full options, PowerShell examples and SDK: [docs/en/daydaymaputil.md](docs/en/daydaymaputil.md).
+
 ---
 
 ## Misc Utilities — `util`
@@ -462,6 +474,7 @@ Full key list: `wtfconfig.ini.example`; API details: [configutil](docs/en/config
 | `wtfutil.notifyutil` | Multi-channel push notifications | [EN](docs/en/notifyutil.md) · [ZH](docs/zh/notifyutil.md) |
 | `wtfutil.translateutil` | Baidu Translate API | [EN](docs/en/translateutil.md) · [ZH](docs/zh/translateutil.md) |
 | `wtfutil.memshellutil` | MemShellParty memory-shell SDK | [EN](docs/en/memshellutil.md) · [ZH](docs/zh/memshellutil.md) |
+| `wtfutil.daydaymaputil` / **`daydaymap`** | Free aggregate counts, API search, key files/rotation, JSONL/URL output | [EN](docs/en/daydaymaputil.md) · [ZH](docs/zh/daydaymaputil.md) |
 | `wtfutil.imgutil` | Random avatar fetch (multi-source fallback) | [EN](docs/en/imgutil.md) · [ZH](docs/zh/imgutil.md) |
 | `wtfutil.singleinstance` | Single-instance lock (`SingleInstance`, `@single_instance`) | [EN](docs/en/singleinstance.md) · [ZH](docs/zh/singleinstance.md) |
 | `wtfutil.util` | Misc helpers, `get_resource`, `UniqueQueue` | [EN](docs/en/util.md) · [ZH](docs/zh/util.md) |

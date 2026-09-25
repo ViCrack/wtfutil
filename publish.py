@@ -115,6 +115,7 @@ def validate_wheel_metadata(wheel_path: str, expected_version: str) -> None:
             f"{distribution_version!r} != {expected_version!r}"
         )
     expected_entry_points = {
+        "daydaymap = wtfutil.daydaymap:main",
         "memshell = wtfutil.memshell:main",
         "pykill = wtfutil.pykill:main",
     }
@@ -184,10 +185,13 @@ def validate_installation(wheel_path: str, expected_version: str) -> None:
         smoke_test = (
             "from importlib import import_module; "
             "from importlib.metadata import version; "
-            "modules = ('configutil', 'fileutil', 'httputil', 'imgutil', "
+            "modules = ('configutil', 'daydaymaputil', 'fileutil', 'httputil', 'imgutil', "
             "'memshellutil', 'notifyutil', 'procutil', 'singleinstance', "
             "'sqlutil', 'strutil', 'translateutil', 'util'); "
             "[import_module(f'wtfutil.{module}') for module in modules]; "
+            "from wtfutil.daydaymaputil import build_query, query_from_icon, query_from_certificate; "
+            "assert callable(query_from_icon) and callable(query_from_certificate); "
+            "assert 'ip.tag!=' in build_query('x'); "
             f"assert version('wtfutil') == {expected_version!r}"
         )
         run(
@@ -200,6 +204,14 @@ def validate_installation(wheel_path: str, expected_version: str) -> None:
             str(environment_python),
             "-m",
             "wtfutil.memshell",
+            "--help",
+            cwd=temporary_directory,
+            stdout=subprocess.DEVNULL,
+        )
+        run(
+            str(environment_python),
+            "-m",
+            "wtfutil.daydaymap",
             "--help",
             cwd=temporary_directory,
             stdout=subprocess.DEVNULL,

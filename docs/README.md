@@ -16,6 +16,7 @@
 | `wtfutil.notifyutil` | [en/notifyutil.md](en/notifyutil.md) | [zh/notifyutil.md](zh/notifyutil.md) |
 | `wtfutil.translateutil` | [en/translateutil.md](en/translateutil.md) | [zh/translateutil.md](zh/translateutil.md) |
 | `wtfutil.memshellutil` | [en/memshellutil.md](en/memshellutil.md) | [zh/memshellutil.md](zh/memshellutil.md) |
+| `wtfutil.daydaymaputil` / **`daydaymap`（CLI：管道、图标/证书）** | [en/daydaymaputil.md](en/daydaymaputil.md) | [zh/daydaymaputil.md](zh/daydaymaputil.md) |
 | `wtfutil.imgutil` | [en/imgutil.md](en/imgutil.md) | [zh/imgutil.md](zh/imgutil.md) |
 | `wtfutil.singleinstance` | [en/singleinstance.md](en/singleinstance.md) | [zh/singleinstance.md](zh/singleinstance.md) |
 | **`pykill`（CLI）** | [en/pykill.md](en/pykill.md) | [zh/pykill.md](zh/pykill.md) |

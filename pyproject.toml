@@ -57,6 +57,7 @@ socks = ["PySocks"]
 [project.scripts]
 pykill = "wtfutil.pykill:main"
 memshell = "wtfutil.memshell:main"
+daydaymap = "wtfutil.daydaymap:main"
 
 [tool.setuptools.packages.find]
 include = ["wtfutil*"]
