@@ -350,13 +350,21 @@ class TestSearch(ClientCase):
         self.assertEqual(self.api.calls[0]['json']['fields'], 'ip,port')
         self.assertNotIn('exclude_fields', self.api.calls[0]['json'])
 
-    def test_page_requests_one_page_and_rejects_max_effort(self):
+    def test_page_requests_one_page_and_max_effort_ignores_page(self):
         client = self.make_client(api=[page([row(1)], 3)], web=[agg(3)])
         self.assertEqual(list(client.search('x', page=2, page_size=100, limit=1)), [row(1)])
         self.assertEqual(self.api.calls[0]['json']['page'], 2)
         self.assertEqual(self.api.calls[0]['json']['page_size'], 1)
-        with self.assertRaises(ValueError):
-            list(client.search('x', page=1, max_effort=True))
+        client = self.make_client(api=[page([row(1)], 3)], web=[agg(3)])
+        self.assertEqual(list(client.search('x', page=2, page_size=100, limit=1, max_effort=True)), [row(1)])
+        self.assertEqual(self.api.calls[0]['json']['page'], 1)
+        self.assertEqual(self.api.calls[0]['json']['page_size'], 1)
+
+    def test_max_effort_ignores_page_size_with_large_limit(self):
+        client = self.make_client(api=[page([row(1)], 1)], web=[agg(1)])
+        self.assertEqual(list(client.search('x', page_size=2, limit=0, max_effort=True)), [row(1)])
+        self.assertEqual(self.api.calls[0]['json']['page'], 1)
+        self.assertEqual(self.api.calls[0]['json']['page_size'], 500)
 
     def test_limit_reduces_first_page_width(self):
         client = self.make_client(api=[page([row(1), row(2)], 10)], web=[agg(10)])
@@ -473,6 +481,35 @@ class TestCLI(KeyFileCase):
         self.assertEqual(summary['returned'], 2)
         self.assertFalse(summary['truncated'])
 
+    def test_max_effort_ignores_page_and_page_size(self):
+        code, out, err = self.invoke(['x', '--page', '2', '--page-size', '100', '--max-effort',
+                                      '--limit', '1', '--interval', '0'],
+                                     api=[page([row(1)], 1)], web=[agg(1)],
+                                     environ={'DAYDAYMAP_API_KEY': 'example-a'})
+        self.assertEqual(code, 0)
+        self.assertEqual(json.loads(out), row(1))
+        self.assertEqual(self.api.calls[0]['json']['page'], 1)
+        self.assertEqual(self.api.calls[0]['json']['page_size'], 1)
+
+    def test_max_effort_ignores_page_size_with_zero_limit(self):
+        code, out, err = self.invoke(['x', '--page-size', '100', '--max-effort', '-l', '0',
+                                      '--interval', '0'],
+                                     api=[page([row(1)], 1)], web=[agg(1)],
+                                     environ={'DAYDAYMAP_API_KEY': 'example-a'})
+        self.assertEqual(code, 0)
+        self.assertEqual(json.loads(out), row(1))
+        self.assertEqual(self.api.calls[0]['json']['page'], 1)
+        self.assertEqual(self.api.calls[0]['json']['page_size'], 500)
+
+    def test_page_fetches_only_requested_page(self):
+        code, out, err = self.invoke(['x', '--page', '2', '--page-size', '1', '--interval', '0'],
+                                     api=[page([row(5)], 3)], web=[agg(3)],
+                                     environ={'DAYDAYMAP_API_KEY': 'example-a'})
+        self.assertEqual(code, 0)
+        self.assertEqual(json.loads(out), row(5))
+        self.assertEqual(self.api.calls[0]['json']['page'], 2)
+        self.assertEqual(len(self.api.calls), 1)
+
     def test_short_page_keeps_partial_output_and_nonzero_status(self):
         code, out, err = self.invoke(['x', '--page-size', '2', '--interval', '0'],
                                     api=[page([row(1)], 3)], web=[agg(3)],
@@ -528,7 +565,8 @@ class TestCLI(KeyFileCase):
         self.assertEqual(output.read_text(encoding='utf-8'), 'http://192.0.2.1\nkept\nhttp://192.0.2.2\n')
 
     def test_invalid_options_fail_without_network(self):
-        for argv in (['x', '--limit', '-1'], ['x', '--page-size', '10001'],
+        for argv in (['x', '--limit', '-1'], ['x', '--page-size', '10001'], ['x', '--page', '0'],
+                     ['x', '--page-size', '10001', '--max-effort'],
                      ['--count', 'x', '--timeout', 'nan'], ['--count']):
             with self.subTest(argv=argv):
                 code, _, _ = self.invoke(argv)

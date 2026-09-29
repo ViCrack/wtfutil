@@ -72,14 +72,15 @@ Usage: `daydaymap [QUERY] [options]`. Search is the default; `--count` outputs c
 | `--quiet` | Search only: hide pre-counts and summaries, not errors |
 | `--fields LIST` | Comma-separated search fields; overrides exclusions |
 | `--exclude-fields LIST` | Comma-separated search field exclusions |
-| `--page-size N` | Search page width, 1..10000; default 500 |
+| `--page-size N` | Search page width, 1..500; default 500; shrunk to `-l` when smaller; ignored with `--max-effort` (fixed at 500, still shrunk by `-l`) |
+| `--page N` | Fetch only the given page without further pagination; ignored with `--max-effort` |
 | `-l N` / `--limit N` | Output cap per input query; default 10000; 0 removes the local cap |
 | `--format {jsonl,url}` | Search output; default JSONL; counts always use JSONL |
-| `--max-effort` | Try one-level aggregate partitioning beyond the result window |
+| `--max-effort` | Try one-level aggregate partitioning beyond the result window; ignores `--page` and `--page-size` |
 | `--max-effort-depth N` | Maximum child queries, 1..1000; default 10, not recursion depth |
 | `-h` / `--help` | Show help and query syntax examples |
 
-Explicit `--fields`, `--exclude-fields`, `--page-size`, `--limit`, `--max-effort`, `--max-effort-depth`, `--format` and `--quiet` belong to search only; pairing them with `--count` fails before reading keys or opening output. `--max-effort-depth` also requires `--max-effort`. If these options are omitted, search uses the defaults listed above.
+Explicit `--fields`, `--exclude-fields`, `--page-size`, `--page`, `--limit`, `--max-effort`, `--max-effort-depth`, `--format` and `--quiet` belong to search only; pairing them with `--count` fails before reading keys or opening output. `--max-effort-depth` also requires `--max-effort`. When `--max-effort` is enabled, `--page` and `--page-size` are ignored and pagination is controlled by the partitioning strategy. If these options are omitted, search uses the defaults listed above.
 
 ## Common query syntax
 
@@ -233,7 +234,7 @@ with DayDayMapClient.from_key_file(timeout=30, interval=0.5) as client:
 | `DayDayMapClient(keys=(), *, session=None, web_session=None, timeout=30, interval=0.5, max_retries=2, retry_backoff=1, proxy=None)` | keys is a string or sequence; no automatic file loading |
 | `DayDayMapClient.from_key_file(path=None, **kwargs)` | File-loading convenience constructor; supports discovery |
 | `client.count(query, *, is_china=False, is_domain=False)` | DayDayMapCount; free aggregate first, automatic API fallback if needed |
-| `client.search(query, *, fields=None, exclude_fields=None, page_size=500, limit=10000, max_effort=False, max_effort_depth=10, is_china=False, is_domain=False, on_count=None)` | dict generator; performs requests during iteration |
+| `client.search(query, *, fields=None, exclude_fields=None, page_size=500, page=None, limit=10000, max_effort=False, max_effort_depth=10, is_china=False, is_domain=False, on_count=None)` | dict generator; performs requests during iteration; `page` and `page_size` are ignored when `max_effort=True` |
 | `client.available_keys` / `client.last_summary` | Active keys / latest started search summary, initially None |
 | `client.close()` / context manager | Close internally created sessions only |
 | `DayDayMapCount` | Immutable query/total/estimated/source/ip_count, with to_dict() |

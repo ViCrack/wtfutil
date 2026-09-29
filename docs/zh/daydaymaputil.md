@@ -72,14 +72,15 @@ Get-Content -Encoding utf8 queries.txt | daydaymap --count
 | `--quiet` | 仅搜索模式：隐藏计数预检和摘要，错误仍写 stderr |
 | `--fields LIST` | 搜索返回字段，逗号分隔，优先于排除字段 |
 | `--exclude-fields LIST` | 搜索排除字段，逗号分隔 |
-| `--page-size N` | 搜索页宽，1..10000，默认 500 |
+| `--page-size N` | 搜索页宽，1..500，默认 500；小于 `-l` 时自动收缩；`--max-effort` 时忽略（固定 500，仍受 `-l` 收缩） |
+| `--page N` | 只取指定页，不再翻页；`--max-effort` 时忽略 |
 | `-l N` / `--limit N` | 每条输入查询输出上限，默认 10000；0 无本地上限 |
 | `--format {jsonl,url}` | 搜索输出格式，默认 JSONL；计数始终 JSONL |
-| `--max-effort` | 超窗口时尝试一层聚合拆分，不保证全量 |
+| `--max-effort` | 超窗口时尝试一层聚合拆分，不保证全量；忽略 `--page` 与 `--page-size` |
 | `--max-effort-depth N` | 每条查询最多子查询数，1..1000，默认 10；不是递归深度 |
 | `-h` / `--help` | 显示帮助与常见查询语法示例 |
 
-只允许搜索模式显式使用 `--fields`、`--exclude-fields`、`--page-size`、`--limit`、`--max-effort`、`--max-effort-depth`、`--format` 和 `--quiet`；`--count` 与这些参数组合会在读取 Key 或打开输出文件前报错。`--max-effort-depth` 需要同时启用 `--max-effort`。未显式提供这些参数时，搜索采用上表所列默认值。
+只允许搜索模式显式使用 `--fields`、`--exclude-fields`、`--page-size`、`--page`、`--limit`、`--max-effort`、`--max-effort-depth`、`--format` 和 `--quiet`；`--count` 与这些参数组合会在读取 Key 或打开输出文件前报错。`--max-effort-depth` 需要同时启用 `--max-effort`。启用 `--max-effort` 时，`--page` 与 `--page-size` 被忽略，分页由拆分策略自行控制。未显式提供这些参数时，搜索采用上表所列默认值。
 
 ## 常见查询语法
 
@@ -233,7 +234,7 @@ with DayDayMapClient.from_key_file(timeout=30, interval=0.5) as client:
 | `DayDayMapClient(keys=(), *, session=None, web_session=None, timeout=30, interval=0.5, max_retries=2, retry_backoff=1, proxy=None)` | keys 为单个字符串或序列；普通构造器不发现文件 |
 | `DayDayMapClient.from_key_file(path=None, **kwargs)` | 文件加载便捷构造，支持自动发现 |
 | `client.count(query, *, is_china=False, is_domain=False)` | 返回 DayDayMapCount；固定聚合优先、必要时自动回退 |
-| `client.search(query, *, fields=None, exclude_fields=None, page_size=500, limit=10000, max_effort=False, max_effort_depth=10, is_china=False, is_domain=False, on_count=None)` | 返回 dict 生成器，迭代时执行请求 |
+| `client.search(query, *, fields=None, exclude_fields=None, page_size=500, page=None, limit=10000, max_effort=False, max_effort_depth=10, is_china=False, is_domain=False, on_count=None)` | 返回 dict 生成器，迭代时执行请求；`max_effort=True` 时忽略 `page` 与 `page_size` |
 | `client.available_keys` / `client.last_summary` | 活跃 Key 数 / 最近已启动搜索的摘要，初始为 None |
 | `client.close()` / 上下文管理器 | 仅关闭内部创建的 session |
 | `DayDayMapCount` | 不可变计数对象，含 query/total/estimated/source/ip_count 与 to_dict() |

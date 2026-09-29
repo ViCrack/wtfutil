@@ -124,10 +124,13 @@ def _parser():
     parser.add_argument('--cert-url', metavar='URL', help='HTTPS 网站，提取叶子证书 DER MD5；支持自定义端口')
     parser.add_argument('--fields', type=_field_list, help='逗号分隔的返回字段，优先于 exclude-fields')
     parser.add_argument('--exclude-fields', type=_field_list, help='逗号分隔的排除字段')
-    parser.add_argument('--page-size', type=_int_range(1, 500), help='分页大小 1..500（默认 500；小于 -l 时自动收缩）')
-    parser.add_argument('--page', type=_int_range(1), help='只取指定页；不能与 --max-effort 同时使用')
+    parser.add_argument('--page-size', type=_int_range(1, 500),
+                        help='分页大小 1..500（默认 500；小于 -l 时自动收缩；--max-effort 时忽略，固定 500）')
+    parser.add_argument('--page', type=_int_range(1),
+                        help='只取指定页，不再翻页；--max-effort 时忽略')
     parser.add_argument('-l', '--limit', type=_int_range(0), help='每条输入的输出上限（默认 10000；0 无本地上限）')
-    parser.add_argument('--max-effort', action='store_true', default=None, help='超过结果窗口时尝试聚合拆分，不保证完整覆盖')
+    parser.add_argument('--max-effort', action='store_true', default=None,
+                        help='超过结果窗口时尝试聚合拆分，不保证完整覆盖；忽略 --page 与 --page-size（固定页宽 500，仍受 -l 收缩）')
     parser.add_argument('--max-effort-depth', type=_int_range(1, 1000), help='最多拆分子查询数（默认 10，不是递归深度）')
     parser.add_argument('--format', choices=('jsonl', 'url'), help='搜索输出格式（默认 jsonl）')
     return parser
@@ -145,12 +148,15 @@ def _validate_mode(args):
     else:
         if args.max_effort_depth is not None and not args.max_effort:
             raise ValueError('--max-effort-depth 需要同时启用 --max-effort。')
-        if args.page is not None and args.max_effort:
-            raise ValueError('--page 不能与 --max-effort 同时使用。')
-        args.page_size = 500 if args.page_size is None else args.page_size
         args.limit = 10000 if args.limit is None else args.limit
-        if args.limit and args.page_size > args.limit:
-            args.page_size = args.limit
+        if args.max_effort:
+            # --max-effort 自行控制分页：忽略 --page 与 --page-size。
+            args.page = None
+            args.page_size = 500
+        else:
+            args.page_size = 500 if args.page_size is None else args.page_size
+            if args.limit and args.page_size > args.limit:
+                args.page_size = args.limit
         args.max_effort = bool(args.max_effort)
         args.quiet = bool(args.quiet)
         args.max_effort_depth = 10 if args.max_effort_depth is None else args.max_effort_depth

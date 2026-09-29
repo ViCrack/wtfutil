@@ -703,6 +703,9 @@ class DayDayMapClient:
         A fixed page width is used throughout each child query. It is reduced
         before the first page when the local limit is smaller. Short non-final
         pages are reported as incomplete rather than silently skipping offsets.
+        With max_effort=True, page and page_size are ignored: the width is
+        fixed at 500 (still shrunk by limit) and pagination is driven by the
+        partitioning strategy.
         """
         query = build_query(query, is_china=is_china, is_domain=is_domain)
         if on_count is not None and not callable(on_count):
@@ -710,8 +713,10 @@ class DayDayMapClient:
         _integer(page_size, 'page_size', 1, 500)
         if page is not None:
             _integer(page, 'page', 1)
-            if max_effort:
-                raise ValueError('page 不能与 max_effort 同时使用。')
+        if max_effort:
+            # max-effort 自行控制分页：忽略 page 与 page_size。
+            page = None
+            page_size = 500
         _integer(limit, 'limit', 0)
         _integer(max_effort_depth, 'max_effort_depth', 1, 1000)
         selected, excluded = _fields(fields), _fields(exclude_fields)

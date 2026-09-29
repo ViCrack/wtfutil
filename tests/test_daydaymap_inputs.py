@@ -227,7 +227,7 @@ class TestPipes(existing.KeyFileCase):
     def test_count_rejects_every_explicit_search_option_before_output(self):
         output = self.work / 'existing.jsonl'
         options = (['--fields', 'ip'], ['--exclude-fields', 'body'], ['--page-size', '500'],
-                   ['--limit', '10000'], ['-l0'], ['--max-effort'], ['--max-effort-depth', '10'],
+                   ['--page', '1'], ['--limit', '10000'], ['-l0'], ['--max-effort'], ['--max-effort-depth', '10'],
                    ['--format', 'jsonl'], ['--format=url'], ['--quiet'])
         for option in options:
             with self.subTest(option=option):
