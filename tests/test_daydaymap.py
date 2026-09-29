@@ -2,15 +2,18 @@
 from __future__ import annotations
 
 import base64
+import hashlib
 import inspect
 import io
 import json
 import os
+import random
 import tempfile
 import threading
 import traceback
 import unittest
 from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime, timedelta
 from pathlib import Path
 from unittest import mock
 
@@ -76,10 +79,11 @@ class FakeSession:
 
 
 class ClientCase(unittest.TestCase):
-    def make_client(self, api=(), web=(), keys=('example-a', 'example-b'), **kwargs):
+    def make_client(self, api=(), web=(), keys=('example-a', 'example-b'), key_cache=False, **kwargs):
         self.api = FakeSession(api)
         self.web = FakeSession(web)
-        return DayDayMapClient(keys, session=self.api, web_session=self.web, interval=0, retry_backoff=0, **kwargs)
+        return DayDayMapClient(keys, session=self.api, web_session=self.web, interval=0, retry_backoff=0,
+                               key_cache=key_cache, **kwargs)
 
 
 class TestCount(ClientCase):
@@ -236,7 +240,8 @@ class TestKeys(KeyFileCase):
             with self.subTest(code=code):
                 client = self.make_client(api=[error(code), page([row(1)], 1)], web=[agg(1)])
                 self.assertEqual(list(client.search('x')), [row(1)])
-                self.assertEqual([call['headers']['api-key'] for call in self.api.calls], ['example-a', 'example-b'])
+                used = [call['headers']['api-key'] for call in self.api.calls]
+                self.assertEqual(sorted(used), ['example-a', 'example-b'])
                 self.assertEqual([call['json']['page'] for call in self.api.calls], [1, 1])
                 self.assertEqual(client.available_keys, 1)
 
@@ -279,12 +284,95 @@ class TestKeys(KeyFileCase):
             self.assertTrue(all(call.kwargs['max_retries'] == 0 for call in factory.call_args_list))
 
 
+class TestKeyCache(ClientCase):
+    def setUp(self):
+        super().setUp()
+        self.cache = Path(self.enterContext(tempfile.TemporaryDirectory())) / 'cache.json'
+
+    def write_cache(self, keys, date=None):
+        digests = [hashlib.sha256(key.encode('utf-8')).hexdigest() for key in keys]
+        self.cache.write_text(json.dumps({'date': date or datetime.now().strftime('%Y-%m-%d'),
+                                          'keys': digests}), encoding='utf-8')
+
+    def read_cache(self):
+        return json.loads(self.cache.read_text(encoding='utf-8'))
+
+    def test_today_cache_filters_keys_at_startup(self):
+        self.write_cache(['example-a'])
+        client = self.make_client(api=[page([row(1)], 1)], web=[agg(1)], key_cache=self.cache)
+        self.assertEqual(client.available_keys, 1)
+        self.assertEqual(list(client.search('x')), [row(1)])
+        self.assertEqual(self.api.calls[0]['headers']['api-key'], 'example-b')
+
+    def test_stale_cache_date_is_ignored(self):
+        self.write_cache(['example-a', 'example-b'], date=(datetime.now() - timedelta(days=1)).strftime('%Y-%m-%d'))
+        client = self.make_client(api=[page([row(1)], 1)], web=[agg(1)], key_cache=self.cache)
+        self.assertEqual(client.available_keys, 2)
+        self.assertEqual(list(client.search('x')), [row(1)])
+        self.assertIn(self.api.calls[0]['headers']['api-key'], ('example-a', 'example-b'))
+
+    def test_quota_exhaustion_is_written_and_reused(self):
+        client = self.make_client(keys=('example-a',), api=[error(2004)], web=[agg(1)], key_cache=self.cache)
+        with self.assertRaises(DayDayMapError) as caught:
+            list(client.search('x'))
+        self.assertEqual(caught.exception.reason, 'quota_exhausted')
+        stored = self.read_cache()
+        self.assertEqual(stored['date'], datetime.now().strftime('%Y-%m-%d'))
+        self.assertEqual(stored['keys'], [hashlib.sha256(b'example-a').hexdigest()])
+        reused = self.make_client(api=[page([row(1)], 1)], web=[agg(1)], key_cache=self.cache)
+        self.assertEqual(reused.available_keys, 1)
+        self.assertEqual(list(reused.search('x')), [row(1)])
+        self.assertEqual(self.api.calls[0]['headers']['api-key'], 'example-b')
+
+    def test_all_keys_cached_reports_quota_exhausted_without_requests(self):
+        self.write_cache(['example-a', 'example-b'])
+        client = self.make_client(api=[], web=[ok({})], key_cache=self.cache)
+        self.assertEqual(client.available_keys, 0)
+        with self.assertRaises(DayDayMapError) as caught:
+            client.count('x')
+        self.assertEqual(caught.exception.reason, 'quota_exhausted')
+        self.assertEqual(self.api.calls, [])
+
+    def test_corrupt_cache_file_is_ignored(self):
+        self.cache.write_text('not json', encoding='utf-8')
+        client = self.make_client(api=[page([row(1)], 1)], web=[agg(1)], key_cache=self.cache)
+        self.assertEqual(client.available_keys, 2)
+
+    def test_unwritable_cache_never_breaks_requests(self):
+        missing = self.cache.parent / 'missing' / 'cache.json'
+        client = self.make_client(keys=('example-a',), api=[error(2004)], web=[agg(1)], key_cache=missing)
+        with self.assertRaises(DayDayMapError) as caught:
+            list(client.search('x'))
+        self.assertEqual(caught.exception.reason, 'quota_exhausted')
+
+    def test_disabled_cache_skips_filtering_and_writing(self):
+        self.write_cache(['example-a'])
+        client = self.make_client(keys=('example-a',), api=[error(2004)], web=[agg(1)], key_cache=False)
+        with self.assertRaises(DayDayMapError):
+            list(client.search('x'))
+        self.assertEqual(self.read_cache()['keys'], [hashlib.sha256(b'example-a').hexdigest()])
+
+    def test_invalid_key_cache_argument_is_rejected(self):
+        with self.assertRaises(ValueError):
+            self.make_client(key_cache=True)
+
+    def test_pool_shuffles_startup_order(self):
+        firsts = set()
+        for seed in range(40):
+            random.seed(seed)
+            pool = _KeyPool(['example-a', 'example-b'])
+            firsts.add(pool.acquire())
+        self.assertEqual(firsts, {'example-a', 'example-b'})
+
+
 class TestRetry(ClientCase):
     def test_429_retries_same_key_then_success(self):
         client = self.make_client(api=[FakeResponse({}, 429, {'Retry-After': '0'}), page([], 0)],
                                   web=[ok({})], max_retries=1)
         self.assertEqual(client.count('x').total, 0)
-        self.assertEqual([call['headers']['api-key'] for call in self.api.calls], ['example-a', 'example-a'])
+        used = [call['headers']['api-key'] for call in self.api.calls]
+        self.assertEqual(used[0], used[1])
+        self.assertIn(used[0], ('example-a', 'example-b'))
 
     def test_429_is_bounded_does_not_rotate(self):
         client = self.make_client(api=[FakeResponse({}, 429)] * 2, web=[ok({})], max_retries=1)
@@ -328,7 +416,7 @@ class TestSearch(ClientCase):
         query = '(title="示例 A" || port="80")'
         client = self.make_client(api=[page([row(1), row(2)], 3), page([row(3)], 3)], web=[agg(3)])
         self.assertEqual(list(client.search(query, page_size=2)), [row(1), row(2), row(3)])
-        self.assertEqual([c['headers']['api-key'] for c in self.api.calls], ['example-a', 'example-b'])
+        self.assertTrue(all(c['headers']['api-key'] in ('example-a', 'example-b') for c in self.api.calls))
         self.assertEqual([c['json']['page'] for c in self.api.calls], [1, 2])
         self.assertTrue(all(base64.b64decode(c['json']['keyword']).decode() == filtered(query) for c in self.api.calls))
         self.assertEqual(client.last_summary.total, 3)
@@ -470,7 +558,7 @@ class TestCLI(KeyFileCase):
                                        api=[page([], 1), page([], 2)], web=[ok({}), ok({})])
         self.assertEqual(code, 0)
         self.assertEqual([json.loads(line)['query'] for line in out.splitlines()], [filtered('x'), filtered('y')])
-        self.assertEqual([call['headers']['api-key'] for call in self.api.calls], ['example-a', 'example-b'])
+        self.assertTrue(all(call['headers']['api-key'] in ('example-a', 'example-b') for call in self.api.calls))
 
     def test_search_jsonl_and_summary_are_separate(self):
         code, out, err = self.invoke(['x', '--interval', '0'], api=[page([row(1), row(2)], 2)],
@@ -527,6 +615,26 @@ class TestCLI(KeyFileCase):
         self.assertIn('quota_exhausted', err)
         self.assertNotIn('example-a', err)
         self.assertNotIn('example-secret', err)
+
+    def test_cli_persists_and_reuses_daily_quota_cache(self):
+        cache = self.home / '.daydaymap_exhausted_keys.json'
+        code, _, err = self.invoke(['x', '--interval', '0'], api=[error(2004)], web=[agg(1)],
+                                   environ={'DAYDAYMAP_API_KEY': 'example-a'})
+        self.assertEqual(code, 3)
+        stored = json.loads(cache.read_text(encoding='utf-8'))
+        self.assertEqual(stored['keys'], [hashlib.sha256(b'example-a').hexdigest()])
+        code, _, err = self.invoke(['x', '--interval', '0'], api=[], web=[agg(1)],
+                                   environ={'DAYDAYMAP_API_KEY': 'example-a'})
+        self.assertEqual(code, 3)
+        self.assertIn('quota_exhausted', err)
+        self.assertEqual(self.api.calls, [])
+
+    def test_cli_no_key_cache_disables_persistence(self):
+        cache = self.home / '.daydaymap_exhausted_keys.json'
+        code, _, _ = self.invoke(['x', '--no-key-cache', '--interval', '0'], api=[error(2004)], web=[agg(1)],
+                                 environ={'DAYDAYMAP_API_KEY': 'example-a'})
+        self.assertEqual(code, 3)
+        self.assertFalse(cache.exists())
 
     def test_removed_count_flags_are_rejected_without_network(self):
         for option in ('--exact', '--free-only'):

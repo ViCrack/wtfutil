@@ -64,6 +64,7 @@ Usage: `daydaymap [QUERY] [options]`. Search is the default; `--count` outputs c
 | `--is-china` | Mainland-China clauses excluding Hong Kong/Macao/Taiwan; off by default |
 | `--is-domain` | Add `is_domain="true"`; off by default |
 | `--key-file FILE` | External key file; repeatable |
+| `--no-key-cache` | Disable the daily exhausted-key cache (default `~/.daydaymap_exhausted_keys.json`, expires by date) |
 | `-o FILE` / `--output FILE` | Append UTF-8 output after reading existing lines and skipping duplicates; omitted or `-` means stdout |
 | `--timeout N` | Per-request timeout, >0 seconds; default 30 |
 | `--interval N` | SDK request interval, >=0; default 0.5 seconds |
@@ -167,7 +168,9 @@ CLI precedence: repeated `--key-file` paths → one `DAYDAYMAP_KEY_FILE` → one
 
 The SDK does not read these CLI credential environment variables. `load_keys()` and `DayDayMapClient.from_key_file()` can discover files; the ordinary constructor does not. Credential loading does not use an INI section, database or browser cookies.
 
-Successful requests return the key to the end of the queue. Codes 2001 (invalid), 2003 (permission) and 2004 (credits) remove the key and retry the same page with the next one. Code 2005 is a result-window limit, not a rotation trigger; 2002/470 indicates bad syntax/arguments. State exists only during the client's lifetime, with no assumed daily reset. `available_keys` counts active leased and idle keys.
+Successful requests return the key to the end of the queue; the starting key is chosen randomly at startup. Codes 2001 (invalid), 2003 (permission) and 2004 (credits) remove the key and retry the same page with the next one. Code 2005 is a result-window limit, not a rotation trigger; 2002/470 indicates bad syntax/arguments. `available_keys` counts active leased and idle keys.
+
+Daily exhausted-key cache: on code 2004 the key's SHA-256 digest is appended to `~/.daydaymap_exhausted_keys.json` (never the plaintext). At startup the file is read and keys recorded for today are skipped outright, avoiding requests that are bound to fail. The file expires as a whole by local date and resets the next day. Cache read/write failures (corrupt, no permission, missing directory) are silently ignored and never affect requests. The CLI disables it with `--no-key-cache`; the SDK constructor's `key_cache` accepts a cache file path, `False` (disabled) or `None` (default location).
 
 Connect timeouts, 429 and 2006 have bounded retries. A 429 retries the same key and observes Retry-After; waits over 60 seconds stop with a rate-limit error. Read timeouts and other possibly charged failures are not automatically replayed. Internal API/web sessions are separate, disable lower-level POST retries, reject redirects and verify TLS. Callers supplying sessions own their authentication, cookies, proxy and retry policies.
 
@@ -231,7 +234,7 @@ with DayDayMapClient.from_key_file(timeout=30, interval=0.5) as client:
 | `query_from_certificate(url, *, timeout=30, proxy=None)` | HTTPS leaf DER MD5; raw `cert.md5` clause |
 | `find_key_file()` | First discovered Path or None |
 | `load_keys(path=None)` | Validated/deduplicated list[str]; [] if no default file |
-| `DayDayMapClient(keys=(), *, session=None, web_session=None, timeout=30, interval=0.5, max_retries=2, retry_backoff=1, proxy=None)` | keys is a string or sequence; no automatic file loading |
+| `DayDayMapClient(keys=(), *, session=None, web_session=None, timeout=30, interval=0.5, max_retries=2, retry_backoff=1, proxy=None, key_cache=None)` | keys is a string or sequence; no automatic file loading; key_cache is a cache path, False to disable, or None for the default |
 | `DayDayMapClient.from_key_file(path=None, **kwargs)` | File-loading convenience constructor; supports discovery |
 | `client.count(query, *, is_china=False, is_domain=False)` | DayDayMapCount; free aggregate first, automatic API fallback if needed |
 | `client.search(query, *, fields=None, exclude_fields=None, page_size=500, page=None, limit=10000, max_effort=False, max_effort_depth=10, is_china=False, is_domain=False, on_count=None)` | dict generator; performs requests during iteration; `page` and `page_size` are ignored when `max_effort=True` |

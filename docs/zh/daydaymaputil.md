@@ -64,6 +64,7 @@ Get-Content -Encoding utf8 queries.txt | daydaymap --count
 | `--is-china` | 添加中国大陆条件，排除港澳台；默认关闭 |
 | `--is-domain` | 添加 `is_domain="true"`；默认关闭 |
 | `--key-file FILE` | 外部 Key 文件，可重复 |
+| `--no-key-cache` | 禁用当日已耗尽 Key 缓存（默认 `~/.daydaymap_exhausted_keys.json`，按天失效） |
 | `-o FILE` / `--output FILE` | 追加 UTF-8 输出；先读取已有行，跳过重复行。默认或 `-` 为 stdout |
 | `--timeout N` | 单请求超时秒数，必须 >0，默认 30 |
 | `--interval N` | SDK 请求间隔，允许 0，默认 0.5 秒 |
@@ -167,7 +168,9 @@ CLI 凭证优先级：重复的 `--key-file` 列表 → `DAYDAYMAP_KEY_FILE` 单
 
 SDK 不读取上述 CLI 凭证环境变量。`load_keys()` / `DayDayMapClient.from_key_file()` 可自动发现文件；普通构造器不自动加载。凭证加载不依赖 INI 段、数据库或浏览器 Cookie。
 
-成功请求把 Key 归还队尾。业务码 2001（无效）、2003（权限）、2004（积分不足）淘汰当前 Key，下一个 Key 重试同页；2005 为窗口限制，不轮换。2002/470 是语法/参数错误。状态仅在客户端生命周期内保留，不猜测每日额度重置。`available_keys` 包含借出和空闲的活跃 Key。
+成功请求把 Key 归还队尾，启动时随机选择起始 Key。业务码 2001（无效）、2003（权限）、2004（积分不足）淘汰当前 Key，下一个 Key 重试同页；2005 为窗口限制，不轮换。2002/470 是语法/参数错误。`available_keys` 包含借出和空闲的活跃 Key。
+
+当日已耗尽 Key 缓存：收到 2004 时，把该 Key 的 SHA-256 摘要写入 `~/.daydaymap_exhausted_keys.json`（不落明文）。每次启动先读取该文件，命中当日记录的 Key 直接跳过，不再发起注定失败的请求；文件按本地日期整体失效，隔天自动清零。缓存读取或写入失败（损坏、无权限、目录不存在）一律静默忽略，绝不影响请求。CLI 使用 `--no-key-cache` 禁用；SDK 构造器 `key_cache` 参数接受缓存文件路径（默认用户目录）、`False`（禁用）或 `None`（默认路径）。
 
 连接建立超时、429、2006 有限重试；429 使用同一 Key，遵守 Retry-After，要求等待超过 60 秒时停止并报告限流。读取超时等可能已经扣费的错误不自动重发。内部 API/web session 分离，禁用底层 POST 自动重试，拒绝重定向并校验 TLS。外部传入的 session 由调用者负责其认证、Cookie、代理和重试策略。
 
@@ -231,7 +234,7 @@ with DayDayMapClient.from_key_file(timeout=30, interval=0.5) as client:
 | `query_from_certificate(url, *, timeout=30, proxy=None)` | HTTPS 叶子 DER MD5，返回原始 `cert.md5` 条件 |
 | `find_key_file()` | 返回第一份默认文件 Path 或 None |
 | `load_keys(path=None)` | 校验、去重并返回 list[str]；无默认文件返回 [] |
-| `DayDayMapClient(keys=(), *, session=None, web_session=None, timeout=30, interval=0.5, max_retries=2, retry_backoff=1, proxy=None)` | keys 为单个字符串或序列；普通构造器不发现文件 |
+| `DayDayMapClient(keys=(), *, session=None, web_session=None, timeout=30, interval=0.5, max_retries=2, retry_backoff=1, proxy=None, key_cache=None)` | keys 为单个字符串或序列；普通构造器不发现文件；key_cache 为缓存路径、False 禁用或 None 默认 |
 | `DayDayMapClient.from_key_file(path=None, **kwargs)` | 文件加载便捷构造，支持自动发现 |
 | `client.count(query, *, is_china=False, is_domain=False)` | 返回 DayDayMapCount；固定聚合优先、必要时自动回退 |
 | `client.search(query, *, fields=None, exclude_fields=None, page_size=500, page=None, limit=10000, max_effort=False, max_effort_depth=10, is_china=False, is_domain=False, on_count=None)` | 返回 dict 生成器，迭代时执行请求；`max_effort=True` 时忽略 `page` 与 `page_size` |

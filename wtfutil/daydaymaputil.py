@@ -6,6 +6,7 @@ import hashlib
 import json
 import math
 import os
+import random
 import re
 import ssl
 import time
@@ -289,6 +290,50 @@ def find_key_file() -> Path | None:
     return Path(found) if found else None
 
 
+DEFAULT_KEY_CACHE_NAME = '.daydaymap_exhausted_keys.json'
+
+
+def _today() -> str:
+    return datetime.now().strftime('%Y-%m-%d')
+
+
+def _key_digest(key: str) -> str:
+    """SHA-256 摘要标识 Key，缓存文件不落明文凭证。"""
+    return hashlib.sha256(key.encode('utf-8')).hexdigest()
+
+
+def _default_key_cache_path() -> Path:
+    return Path.home() / DEFAULT_KEY_CACHE_NAME
+
+
+def _load_exhausted_digests(path) -> set[str]:
+    """读取当日已耗尽 Key 的摘要；过期或损坏的缓存视为空。"""
+    try:
+        data = json.loads(Path(path).expanduser().read_text(encoding='utf-8'))
+    except (OSError, ValueError, UnicodeError):
+        return set()
+    if not isinstance(data, dict) or data.get('date') != _today():
+        return set()
+    digests = data.get('keys')
+    if not isinstance(digests, list):
+        return set()
+    return {digest for digest in digests if isinstance(digest, str) and digest}
+
+
+def _save_exhausted_digests(path, digests) -> None:
+    """尽力重写当日缓存；缓存写失败绝不影响请求。"""
+    target = Path(path).expanduser()
+    temporary = target.with_name(target.name + '.tmp')
+    try:
+        temporary.write_text(json.dumps({'date': _today(), 'keys': sorted(digests)}), encoding='utf-8')
+        os.replace(temporary, target)
+    except OSError:
+        try:
+            temporary.unlink()
+        except OSError:
+            pass
+
+
 def load_keys(path: str | Path | None = None) -> list[str]:
     """Read an explicit or discovered UTF-8 key file; absent defaults return []."""
     try:
@@ -376,7 +421,9 @@ class _KeyPool:
     """Exclusive round-robin leases; an empty idle queue need not mean exhaustion."""
 
     def __init__(self, keys):
-        self._idle = deque(dict.fromkeys(keys))
+        shuffled = list(dict.fromkeys(keys))
+        random.shuffle(shuffled)
+        self._idle = deque(shuffled)
         self._leased: set[str] = set()
         self._condition = Condition()
 
@@ -510,7 +557,8 @@ class DayDayMapClient:
 
     def __init__(self, keys: Iterable[str] = (), *, session=None, web_session=None,
                  timeout: float = 30, interval: float = 0.5, max_retries: int = 2,
-                 retry_backoff: float = 1, proxy: str | None = None):
+                 retry_backoff: float = 1, proxy: str | None = None,
+                 key_cache: str | Path | bool | None = None):
         _positive_number(timeout, 'timeout')
         _positive_number(interval, 'interval', zero=True)
         _positive_number(retry_backoff, 'retry_backoff', zero=True)
@@ -518,9 +566,21 @@ class DayDayMapClient:
         validate_proxy(proxy)
         if session is not None and session is web_session:
             raise ValueError('API 与匿名聚合必须使用不同的 session。')
-        self._keys = _KeyPool(_clean_keys(keys))
-        self._had_keys = self._keys.size > 0
-        self._disabled_codes: list[int] = []
+        if key_cache is None:
+            self._key_cache = _default_key_cache_path()
+        elif key_cache is False:
+            self._key_cache = None
+        elif isinstance(key_cache, (str, Path)):
+            self._key_cache = Path(key_cache).expanduser()
+        else:
+            raise ValueError('key_cache 必须是缓存文件路径、False 或 None。')
+        provided = _clean_keys(keys)
+        self._had_keys = bool(provided)
+        exhausted = _load_exhausted_digests(self._key_cache) if self._key_cache else set()
+        active = [key for key in provided if _key_digest(key) not in exhausted]
+        self._keys = _KeyPool(active)
+        # 当日缓存命中的 Key 视为 2004：全部命中时报告 quota_exhausted 而非 no_keys。
+        self._disabled_codes: list[int] = [2004] * (len(provided) - len(active))
         self.timeout = timeout
         self.interval = interval
         self.max_retries = max_retries
@@ -670,8 +730,20 @@ class DayDayMapClient:
                     raise
                 self._disabled_codes.append(exc.code)
                 self._keys.discard(key)
+                if exc.code == 2004:
+                    self._mark_key_exhausted(key)
             finally:
                 self._keys.release(key)
+
+    def _mark_key_exhausted(self, key: str) -> None:
+        """把当日耗尽的 Key 摘要写入缓存；写失败静默忽略。"""
+        if self._key_cache is None:
+            return
+        digests = _load_exhausted_digests(self._key_cache)
+        digest = _key_digest(key)
+        if digest not in digests:
+            digests.add(digest)
+            _save_exhausted_digests(self._key_cache, digests)
 
     def count(self, query: str, *, is_china: bool = False,
               is_domain: bool = False) -> DayDayMapCount:
@@ -687,6 +759,9 @@ class DayDayMapClient:
             if total is not None:
                 return DayDayMapCount(query, total, True, 'aggregate', _nonnegative_int(data.get('ip_num')))
         if not self.available_keys:
+            # 提供过 Key 但全部命中当日耗尽缓存时，报告配额而非聚合不可用。
+            if self._had_keys and self._disabled_codes and all(code == 2004 for code in self._disabled_codes):
+                raise DayDayMapError('quota_exhausted')
             raise DayDayMapError('aggregate_unavailable')
         data = self._api(query, 1, 1, ('ip',))
         total = _nonnegative_int(data.get('total'))

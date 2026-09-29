@@ -110,6 +110,8 @@ def _parser():
     parser.add_argument('--template', help='如 domain="{}"；{} 必须位于双引号内，输入值自动转义')
     parser.add_argument('--key-file', action='append', default=[], metavar='FILE',
                         help='一行一个 Key，可重复；默认按 get_resource 查找 daydaymap_keys.txt：当前目录、上级 resource/、用户目录')
+    parser.add_argument('--no-key-cache', action='store_true',
+                        help='禁用当日已耗尽 Key 缓存（默认 ~/.daydaymap_exhausted_keys.json，按天失效）')
     parser.add_argument('-o', '--output', metavar='FILE', help='追加写入 UTF-8 文件，并跳过已有行；默认或 - 为 stdout')
     parser.add_argument('--timeout', type=_float_range(), default=30, help='单请求超时秒数（默认 30）')
     parser.add_argument('--interval', type=_float_range(True), default=0.5, help='请求间隔秒数（默认 0.5）')
@@ -414,7 +416,8 @@ def main(argv: list[str] | None = None) -> int:
             if first is None and (not has_source or values or streams or args.template is not None):
                 raise ValueError('请提供 QUERY、-q、--query-file、管道或图标/证书来源。')
             client = stack.enter_context(DayDayMapClient(keys, timeout=args.timeout, interval=args.interval,
-                                                        max_retries=args.max_retries, proxy=args.proxy))
+                                                        max_retries=args.max_retries, proxy=args.proxy,
+                                                        key_cache=False if args.no_key_cache else None))
             sources = []
             if args.icon_file is not None or args.icon_url is not None:
                 sources.append(query_from_icon(args.icon_file, url=args.icon_url, timeout=args.timeout, proxy=args.proxy))
