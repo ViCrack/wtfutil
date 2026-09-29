@@ -53,10 +53,54 @@ def _field_list(text):
         raise argparse.ArgumentTypeError(str(exc)) from None
 
 
+_EPILOG = """常见查询语法示例（查询值需用英文双引号，不区分大小写）：
+  IP 与网络:
+    ip="1.1.1.1"                   单一 IPv4/IPv6 地址
+    ip="1.1.1.0/24"                CIDR 网段（或范围 "1.1.1.0-1.1.1.255"）
+    port="80" 或 ip.port="80"      端口（支持 >、>=、<、<= 比较）
+    service="http"                 服务协议（如 http, ssh, mysql）
+    is_ipv6="true"                 IPv6 资产（false 为 IPv4）
+  Web 与域名:
+    domain="example.com"           域名及子域名
+    domain.root="example.com"      主域名相关子域名
+    title="后台管理"                网页标题包含
+    header="Server: Apache"        响应头包含
+    body="管理系统"                正文内容包含
+    status_code="200"              HTTP 状态码
+    icon="MD5" 或 web.icon="MD5"   网站图标 MD5
+    is_domain="true"               域名资产（同 CLI --is-domain）
+    is_web="true"                  Web 资产
+  应用与组件:
+    app="Nginx"                    应用名称（如 Tomcat, Spring 等）
+    product="OpenSSL"              组件名称
+    os="Linux"                     操作系统
+  证书与归属:
+    cert.subject.cn="example.com"  证书使用者通用名 (CN)
+    cert.issuer.cn="Let's Encrypt" 证书颁发者通用名
+    icp="京ICP备..."               ICP 备案号包含
+    icp.name="企业名称"            ICP 备案单位名称
+    org.name="盛邦安全"            资产归属组织/企业名称
+    asn="AS15169"                  自治域编号
+  地域与标签:
+    ip.country="CN"                国家代码或名称（如 CN, 中国）
+    ip.province="浙江"             省份
+    ip.city="杭州"                 城市
+    ip.tag="CDN"                   特色标签（如 CDN, 蜜罐, 云厂商）
+  逻辑运算与组合:
+    && (与), || (或), != (非), () 分组
+    示例: app="Apache" && port="8080"
+    示例: (title="登录" || title="admin") && ip.country="CN"
+    示例: domain="example.com" && port!="80"
+
+输入与提示:
+  无显式输入且 stdin 非终端时自动逐行读取；如需查询字面量 search/count，请使用 -q。"""
+
+
 def _parser():
     parser = argparse.ArgumentParser(
         prog='daydaymap', description='默认搜索，--count 计数；免费聚合优先，强制排除平台已标记蜜罐。',
-        epilog='无显式输入且 stdin 非终端时自动逐行读取；如需查询字面量 search/count，请使用 -q。',
+        epilog=_EPILOG,
+        formatter_class=argparse.RawDescriptionHelpFormatter,
         allow_abbrev=False,
     )
     parser.add_argument('query_pos', nargs='?', metavar='QUERY', help='原始查询语句或模板输入值')

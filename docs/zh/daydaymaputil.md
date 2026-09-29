@@ -77,9 +77,44 @@ Get-Content -Encoding utf8 queries.txt | daydaymap --count
 | `--format {jsonl,url}` | 搜索输出格式，默认 JSONL；计数始终 JSONL |
 | `--max-effort` | 超窗口时尝试一层聚合拆分，不保证全量 |
 | `--max-effort-depth N` | 每条查询最多子查询数，1..1000，默认 10；不是递归深度 |
-| `-h` / `--help` | 显示帮助 |
+| `-h` / `--help` | 显示帮助与常见查询语法示例 |
 
 只允许搜索模式显式使用 `--fields`、`--exclude-fields`、`--page-size`、`--limit`、`--max-effort`、`--max-effort-depth`、`--format` 和 `--quiet`；`--count` 与这些参数组合会在读取 Key 或打开输出文件前报错。`--max-effort-depth` 需要同时启用 `--max-effort`。未显式提供这些参数时，搜索采用上表所列默认值。
+
+## 常见查询语法
+
+通过 `daydaymap --help` 也可以随时在终端查阅常用语法速查表。查询值需要使用英文双引号包裹，不区分大小写：
+
+| 分类 | 语法示例 | 说明 |
+|---|---|---|
+| **IP 与网络** | `ip="1.1.1.1"` | 单一 IPv4 或 IPv6 地址 |
+| | `ip="1.1.1.0/24"` | CIDR 网段（支持范围如 `"1.1.1.0-1.1.1.255"`） |
+| | `port="80"` 或 `ip.port="80"` | 端口（支持 `>`、`>=`、`<`、`<=` 比较） |
+| | `service="http"` | 服务协议（如 http, ssh, mysql） |
+| | `is_ipv6="true"` | IPv6 资产（`false` 为 IPv4） |
+| **Web 与域名** | `domain="example.com"` | 域名及其全部子域名 |
+| | `domain.root="example.com"` | 主域名相关子域名 |
+| | `title="后台管理"` | 网页标题包含指定文本 |
+| | `header="Server: Apache"` | HTTP 响应头包含指定文本 |
+| | `body="管理系统"` | 网页正文包含指定文本 |
+| | `status_code="200"` | HTTP 响应状态码 |
+| | `icon="MD5"` 或 `web.icon="MD5"` | 网站图标 MD5 |
+| | `is_domain="true"` | 域名资产（与 CLI `--is-domain` 相同） |
+| | `is_web="true"` | Web 资产 |
+| **应用与组件** | `app="Nginx"` | 应用名称（如 Tomcat, Spring 等） |
+| | `product="OpenSSL"` | 组件名称 |
+| | `os="Linux"` | 操作系统类型 |
+| **证书与归属** | `cert.subject.cn="example.com"` | 证书持有者通用名 (CN) |
+| | `cert.issuer.cn="Let's Encrypt"` | 证书颁发者通用名 |
+| | `icp="京ICP备..."` | ICP 备案号包含 |
+| | `icp.name="企业名称"` | ICP 备案单位名称 |
+| | `org.name="组织名称"` | 资产归属组织/企业名称 |
+| | `asn="AS15169"` | 自治域编号 |
+| **地域与标签** | `ip.country="CN"` | 国家代码或名称（如 CN, 中国） |
+| | `ip.province="浙江"` | 省份 |
+| | `ip.city="杭州"` | 城市 |
+| | `ip.tag="CDN"` | 特色标签（如 CDN, 蜜罐, 云厂商） |
+| **逻辑运算** | `&&`（与）、`\|\|`（或）、`!=`（非）、`()` 分组 | `app="Apache" && port="8080"`<br>`(title="登录" \|\| title="admin") && ip.country="CN"`<br>`domain="example.com" && port!="80"` |
 
 ## 输入顺序、模板与文件保护
 

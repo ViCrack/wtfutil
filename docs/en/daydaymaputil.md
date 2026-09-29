@@ -77,9 +77,44 @@ Usage: `daydaymap [QUERY] [options]`. Search is the default; `--count` outputs c
 | `--format {jsonl,url}` | Search output; default JSONL; counts always use JSONL |
 | `--max-effort` | Try one-level aggregate partitioning beyond the result window |
 | `--max-effort-depth N` | Maximum child queries, 1..1000; default 10, not recursion depth |
-| `-h` / `--help` | Show help |
+| `-h` / `--help` | Show help and query syntax examples |
 
 Explicit `--fields`, `--exclude-fields`, `--page-size`, `--limit`, `--max-effort`, `--max-effort-depth`, `--format` and `--quiet` belong to search only; pairing them with `--count` fails before reading keys or opening output. `--max-effort-depth` also requires `--max-effort`. If these options are omitted, search uses the defaults listed above.
+
+## Common query syntax
+
+You can also run `daydaymap --help` anytime to inspect the quick syntax reference. Query string values must be wrapped in double quotes and are case-insensitive:
+
+| Category | Syntax example | Description |
+|---|---|---|
+| **IP & Network** | `ip="1.1.1.1"` | Single IPv4 or IPv6 address |
+| | `ip="1.1.1.0/24"` | CIDR range (or range `"1.1.1.0-1.1.1.255"`) |
+| | `port="80"` or `ip.port="80"` | Port (supports `>`, `>=`, `<`, `<=`) |
+| | `service="http"` | Service protocol (e.g. http, ssh, mysql) |
+| | `is_ipv6="true"` | IPv6 assets (`false` for IPv4) |
+| **Web & Domain** | `domain="example.com"` | Domain and subdomains |
+| | `domain.root="example.com"` | Root domain and child domains |
+| | `title="后台管理"` | Web page title contains |
+| | `header="Server: Apache"` | Response header contains |
+| | `body="管理系统"` | Web page body contains |
+| | `status_code="200"` | HTTP response status code |
+| | `icon="MD5"` or `web.icon="MD5"` | Favicon MD5 |
+| | `is_domain="true"` | Domain assets (matches CLI `--is-domain`) |
+| | `is_web="true"` | Web assets |
+| **App & Component** | `app="Nginx"` | Application name (e.g. Tomcat, Spring) |
+| | `product="OpenSSL"` | Component name |
+| | `os="Linux"` | Operating system type |
+| **Cert & Ownership** | `cert.subject.cn="example.com"` | Certificate subject common name (CN) |
+| | `cert.issuer.cn="Let's Encrypt"` | Certificate issuer common name |
+| | `icp="京ICP备..."` | ICP filing number contains |
+| | `icp.name="企业名称"` | ICP entity name |
+| | `org.name="组织名称"` | Asset organization name |
+| | `asn="AS15169"` | Autonomous system number |
+| **Region & Tags** | `ip.country="CN"` | Country code or name (e.g. CN, China) |
+| | `ip.province="浙江"` | Province |
+| | `ip.city="杭州"` | City |
+| | `ip.tag="CDN"` | Asset tags (e.g. CDN, 蜜罐, 云厂商) |
+| **Logical Operators** | `&&`, `\|\|`, `!=`, `()` grouping | `app="Apache" && port="8080"`<br>`(title="登录" \|\| title="admin") && ip.country="CN"`<br>`domain="example.com" && port!="80"` |
 
 ## Input order, templates and file protection
 

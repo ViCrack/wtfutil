@@ -384,6 +384,24 @@ class TestPipes(existing.KeyFileCase):
                 self.assertNotIn('旧', error_text)
                 self.assertNotIn('移除', error_text)
 
+    def test_help_includes_common_query_syntax_examples(self):
+        code, help_text, _ = self.invoke(['--help'])
+        self.assertEqual(code, 0)
+        expected_keywords = [
+            '常见查询语法示例',
+            'ip=',
+            'port=',
+            'domain=',
+            'title=',
+            'app=',
+            'cert.subject.cn=',
+            'ip.country=',
+            '&&',
+        ]
+        for keyword in expected_keywords:
+            with self.subTest(keyword=keyword):
+                self.assertIn(keyword, help_text)
+
     def test_no_dry_run_and_mandatory_honeypot_filter_has_no_switch(self):
         code, out, _ = self.invoke(['--help'])
         self.assertEqual(code, 0)
