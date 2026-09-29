@@ -155,6 +155,8 @@ class TestCount(ClientCase):
         with self.assertRaises(DayDayMapError) as caught:
             client.count('bad syntax')
         self.assertEqual(caught.exception.reason, 'invalid_query')
+        self.assertEqual(caught.exception.query, filtered('bad syntax'))
+        self.assertIn(filtered('bad syntax'), caught.exception.to_dict()['message'])
         self.assertEqual(self.api.calls, [])
         client = self.make_client(api=[error(2002)], web=[ok({})])
         with self.assertRaises(DayDayMapError):
@@ -347,6 +349,14 @@ class TestSearch(ClientCase):
         self.assertEqual(list(client.search('x', fields=('ip', 'port'), exclude_fields=('body',))), [{'ip': '192.0.2.1', 'port': 80}])
         self.assertEqual(self.api.calls[0]['json']['fields'], 'ip,port')
         self.assertNotIn('exclude_fields', self.api.calls[0]['json'])
+
+    def test_page_requests_one_page_and_rejects_max_effort(self):
+        client = self.make_client(api=[page([row(1)], 3)], web=[agg(3)])
+        self.assertEqual(list(client.search('x', page=2, page_size=100, limit=1)), [row(1)])
+        self.assertEqual(self.api.calls[0]['json']['page'], 2)
+        self.assertEqual(self.api.calls[0]['json']['page_size'], 1)
+        with self.assertRaises(ValueError):
+            list(client.search('x', page=1, max_effort=True))
 
     def test_limit_reduces_first_page_width(self):
         client = self.make_client(api=[page([row(1), row(2)], 10)], web=[agg(10)])
@@ -613,9 +623,27 @@ class TestCLI(KeyFileCase):
     def test_empty_default_file_does_not_fall_through_to_home(self):
         (self.work / 'daydaymap_keys.txt').write_text('# empty\n', encoding='utf-8')
         (self.home / 'daydaymap_keys.txt').write_text('example-home\n', encoding='utf-8')
-        code, _, _ = self.invoke(['x'])
+        code, _, err = self.invoke(['x'])
         self.assertEqual(code, 2)
+        payload = json.loads(err)
+        self.assertEqual(payload['error'], 'no_keys')
+        self.assertIn(str((self.work / 'daydaymap_keys.txt').resolve()), payload['key_files'])
+        self.assertIn(str((self.home / 'daydaymap_keys.txt').resolve()), payload['key_files'])
         self.assertEqual(self.api.calls + self.web.calls, [])
+
+    def test_query_requires_key_and_errors_list_existing_key_files(self):
+        empty = self.work / 'resource' / 'daydaymap_keys.txt'
+        empty.write_text('', encoding='utf-8')
+        home = self.home / 'daydaymap_keys.txt'
+        home.write_text('example-home\n', encoding='utf-8')
+        code, _, err = self.invoke(['--count', 'bad syntax'], web=[error(470)],
+                                   environ={'DAYDAYMAP_API_KEY': 'example-env'})
+        self.assertEqual(code, 2)
+        payload = json.loads(err)
+        self.assertEqual(payload['error'], 'invalid_query')
+        self.assertIn('(bad syntax) && ip.tag!="蜜罐"', payload['query'])
+        self.assertEqual(payload['key_files'], [str(empty.resolve()), str(home.resolve())])
+        self.assertNotIn('example-home', err)
 
     def test_invalid_default_file_does_not_fall_through_to_home(self):
         (self.work / 'daydaymap_keys.txt').write_text('example-secret invalid\n', encoding='utf-8')

@@ -222,14 +222,20 @@ def certificate_md5(url, *, timeout=30, proxy=None):
 class DayDayMapError(RuntimeError):
     """Sanitized failure with stable reason/code/status fields, never a raw payload."""
 
-    def __init__(self, reason: str, *, code: int | None = None, status_code: int | None = None):
+    def __init__(self, reason: str, *, code: int | None = None, status_code: int | None = None,
+                 query: str | None = None):
         self.reason = reason
         self.code = code
         self.status_code = status_code
-        super().__init__(_MESSAGES.get(reason, 'DayDayMap 请求失败。'))
+        self.query = query
+        message = _MESSAGES.get(reason, 'DayDayMap 请求失败。')
+        if reason == 'invalid_query' and query:
+            message = f'{message} 解析后的查询：{query}'
+        super().__init__(message)
 
     def to_dict(self):
-        return {'error': self.reason, 'message': str(self), 'code': self.code, 'status_code': self.status_code}
+        return {'error': self.reason, 'message': str(self), 'code': self.code,
+                'status_code': self.status_code, 'query': self.query}
 
 
 @dataclass(frozen=True)
@@ -616,7 +622,13 @@ class DayDayMapClient:
                     elif code != 200:
                         reason = {2001: 'invalid_key', 2002: 'invalid_query', 470: 'invalid_query',
                                   2003: 'permission_denied', 2004: 'quota_exhausted', 2005: 'result_limit'}.get(code)
-                        raise DayDayMapError(reason or 'invalid_response', code=code)
+                        query = payload.get('keyword') if reason == 'invalid_query' else None
+                        if isinstance(query, str):
+                            try:
+                                query = base64.b64decode(query, validate=True).decode('utf-8')
+                            except (ValueError, UnicodeError):
+                                query = None
+                        raise DayDayMapError(reason or 'invalid_response', code=code, query=query)
                     else:
                         data = envelope.get('data')
                         if not isinstance(data, dict):
@@ -683,8 +695,9 @@ class DayDayMapClient:
         return DayDayMapCount(query, total, False, 'api')
 
     def search(self, query: str, *, fields=None, exclude_fields=None, page_size: int = 500,
-               limit: int = 10000, max_effort: bool = False, max_effort_depth: int = 10,
-               is_china: bool = False, is_domain: bool = False, on_count=None) -> Iterator[dict]:
+               page: int | None = None, limit: int = 10000, max_effort: bool = False,
+               max_effort_depth: int = 10, is_china: bool = False, is_domain: bool = False,
+               on_count=None) -> Iterator[dict]:
         """Stream rows; last_summary remains available even after partial failure.
 
         A fixed page width is used throughout each child query. It is reduced
@@ -694,7 +707,11 @@ class DayDayMapClient:
         query = build_query(query, is_china=is_china, is_domain=is_domain)
         if on_count is not None and not callable(on_count):
             raise ValueError('on_count 必须可调用。')
-        _integer(page_size, 'page_size', 1, 10000)
+        _integer(page_size, 'page_size', 1, 500)
+        if page is not None:
+            _integer(page, 'page', 1)
+            if max_effort:
+                raise ValueError('page 不能与 max_effort 同时使用。')
         _integer(limit, 'limit', 0)
         _integer(max_effort_depth, 'max_effort_depth', 1, 1000)
         selected, excluded = _fields(fields), _fields(exclude_fields)
@@ -736,8 +753,20 @@ class DayDayMapClient:
                 remaining = limit - summary.returned if limit else API_LIMIT
                 if remaining <= 0:
                     break
-                # Never vary page_size halfway through a query: page offsets depend on it.
                 width = min(page_size, remaining, API_LIMIT)
+                if page is not None:
+                    body = self._api(child, page, width, requested, wire_excluded)
+                    rows = body.get('list')
+                    if not isinstance(rows, list):
+                        raise DayDayMapError('invalid_response')
+                    for asset in rows[:remaining]:
+                        if not isinstance(asset, dict):
+                            raise DayDayMapError('invalid_response')
+                        summary.returned += 1
+                        summary.fetched += 1
+                        yield asset
+                    summary.reason = 'complete'
+                    break
                 offset = 0
                 capped = False
                 for page_number in range(1, (API_LIMIT + width - 1) // width + 1):
