@@ -407,7 +407,7 @@ daydaymap --icon-file favicon.ico --key-file custom-keys.txt
 daydaymap --cert-url https://example.com:8443 --proxy http://127.0.0.1:8080
 ```
 
-所有查询强制排除平台已标记蜜罐，无法保证识别未标记蜜罐；地域和域名限制需显式启用。Key 文件一行一个，按 `get_resource` 发现工作目录、上级 `resource/`、用户目录的第一份 `daydaymap_keys.txt`；显式文件和环境变量优先。积分不足换 Key 重试同页。计数免费聚合优先，失败且有 Key 时可能付费回退；搜索预检不额外付费计数。JSONL/URL 结果写 stdout，预检和摘要写 stderr。默认搜索，使用 `--count` 计数；裸位置词 `search` / `count` 不作为查询输入，要查询同名字面量请用 `-q`。`--count` 不能显式搭配搜索专用参数。可用 `python -m wtfutil.daydaymap`。完整参数、PowerShell 示例及 SDK：[docs/zh/daydaymaputil.md](docs/zh/daydaymaputil.md)。
+所有查询强制排除平台已标记蜜罐、涉黄、涉赌，无法保证识别未标记资产；地域和域名限制需显式启用。Key 文件一行一个，按 `get_resource` 发现工作目录、上级 `resource/`、用户目录的第一份 `daydaymap_keys.txt`；显式文件和环境变量优先。积分不足换 Key 重试同页。计数免费聚合优先，失败且有 Key 时可能付费回退；搜索预检不额外付费计数。JSONL/URL 结果写 stdout，预检和摘要写 stderr。默认搜索，使用 `--count` 计数；裸位置词 `search` / `count` 不作为查询输入，要查询同名字面量请用 `-q`。`--count` 不能显式搭配搜索专用参数。可用 `python -m wtfutil.daydaymap`。完整参数、PowerShell 示例及 SDK：[docs/zh/daydaymaputil.md](docs/zh/daydaymaputil.md)。
 
 ---
 

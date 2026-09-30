@@ -35,7 +35,7 @@ class FakeResponse:
 
 
 def filtered(query):
-    return f'({query}) && ip.tag!="蜜罐"'
+    return f'({query}) && ip.tag!="蜜罐" && ip.tag!="涉黄" && ip.tag!="涉赌"'
 
 
 def ok(data):

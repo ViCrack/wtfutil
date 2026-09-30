@@ -93,7 +93,7 @@ class TestPipelineProcess(unittest.TestCase):
         process.stdin.write('example.com\n')
         process.stdin.flush()
         first = json.loads(output.get(timeout=10))
-        self.assertEqual(first['query'], '(domain="example.com") && ip.tag!="蜜罐"')
+        self.assertEqual(first['query'], '(domain="example.com") && ip.tag!="蜜罐" && ip.tag!="涉黄" && ip.tag!="涉赌"')
         self.assertIsNone(process.poll())
         process.stdin.write('示例.example\n')
         process.stdin.flush()

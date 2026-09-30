@@ -1,6 +1,6 @@
 # wtfutil.daydaymaputil 与 daydaymap CLI
 
-DayDayMap Python SDK 与流式 CLI，用于查询平台已有资产。所有 SDK `count` / `search` 和 CLI 请求都强制排除**平台已标记的蜜罐**；不能识别或保证排除未标记蜜罐。地域、域名和 IPv4 默认均不限制。
+DayDayMap Python SDK 与流式 CLI，用于查询平台已有资产。所有 SDK `count` / `search` 和 CLI 请求都强制排除**平台已标记的蜜罐、涉黄、涉赌**；不能识别或保证排除未标记资产。地域、域名和 IPv4 默认均不限制。
 
 `daydaymaputil.py` 提供 SDK、Key 池、聚合计数、分页与拆分，内部还负责图标和证书来源传输；`daydaymap.py` 只导出 CLI `main`。
 
@@ -33,9 +33,9 @@ daydaymap --cert-url https://example.com:8443 --proxy http://127.0.0.1:8080
 daydaymap --query-file queries.txt --icon-file favicon.ico --key-file custom-keys.txt
 ```
 
-默认搜索，使用 `--count` 计数。裸 `search` / `count` 位置词不作为查询输入；若要查询这些字面量，请使用 `-q search` / `-q count`。所有查询均强制应用蜜罐过滤。
+默认搜索，使用 `--count` 计数。裸 `search` / `count` 位置词不作为查询输入；若要查询这些字面量，请使用 `-q search` / `-q count`。所有查询均强制应用蜜罐、涉黄、涉赌过滤。
 
-SDK 将原始 `a || b` 包裹为 `(a || b) && ip.tag!="蜜罐"`。`build_query()` 用于预览或向其他调用者提供完整条件；`count` / `search` 接收原始查询，避免先调用 builder 再重复包裹。
+SDK 将原始 `a || b` 包裹为 `(a || b) && ip.tag!="蜜罐" && ip.tag!="涉黄" && ip.tag!="涉赌"`。`build_query()` 用于预览或向其他调用者提供完整条件；`count` / `search` 接收原始查询，避免先调用 builder 再重复包裹。
 
 PowerShell 推荐通过 UTF-8 文件避免不同版本对原生程序双引号参数的差异：
 
@@ -135,7 +135,7 @@ Get-Content -Encoding utf8 queries.txt | daydaymap --count
 所有公开 count/search 入口统一构造：
 
 ```text
-(原始查询) && ip.tag!="蜜罐"
+(原始查询) && ip.tag!="蜜罐" && ip.tag!="涉黄" && ip.tag!="涉赌"
 ```
 
 `--is-china` / `is_china=True` 额外添加：
@@ -144,7 +144,7 @@ Get-Content -Encoding utf8 queries.txt | daydaymap --count
 ip.country="CN" && ip.province!="香港" && ip.province!="澳门" && ip.province!="台湾" && ip.city!="香港" && ip.city!="澳门"
 ```
 
-`--is-domain` / `is_domain=True` 添加 `is_domain="true"`。这些条件应用于免费聚合、付费回退、所有页和拆分子查询；依赖平台的标签与归属地数据，不在本地额外推断地域或蜜罐。
+`--is-domain` / `is_domain=True` 添加 `is_domain="true"`。这些条件应用于免费聚合、付费回退、所有页和拆分子查询；依赖平台的标签与归属地数据，不在本地额外推断地域或标签。
 
 ## 图标、证书与代理
 
@@ -179,7 +179,7 @@ SDK 不读取上述 CLI 凭证环境变量。`load_keys()` / `DayDayMapClient.fr
 `--count` 先请求匿名聚合 `/api/v1/raymap/search/aggregate/query`，不发送 Key。多个可用桶维度取加总最大值，包含“其他”桶，始终标记**估算**。`ip_num` 仅作 `ip_count`，不是资产总量；空/无效桶不当成零。
 
 ```json
-{"query":"(domain=\"example.com\") && ip.tag!=\"蜜罐\"","total":100,"estimated":true,"source":"aggregate","ip_count":80}
+{"query":"(domain=\"example.com\") && ip.tag!=\"蜜罐\" && ip.tag!=\"涉黄\" && ip.tag!=\"涉赌\"","total":100,"estimated":true,"source":"aggregate","ip_count":80}
 ```
 
 数字仅为示例。聚合不可用且有 Key 时，CLI 和 SDK 的 `count()` 都会自动使用 `/api/v1/raymap/search/all` 的 `page=1,page_size=1,fields=ip` 获取 `data.total`，返回 `estimated=false,source=api`。**该回退可能消耗积分**，包括自动发现的 Key。语法错误或持续限流不触发回退。如果必须保证不产生付费 API 请求，请在调用 SDK 前不要给客户端提供 Key，或使用无 Key 的 CLI 计数环境（注意自动发现的 Key 文件也算提供 Key）。网页聚合行为可能变化；扣费、权限、限流以平台为准。
@@ -229,7 +229,7 @@ with DayDayMapClient.from_key_file(timeout=30, interval=0.5) as client:
 | 公开 API | 说明 |
 |---|---|
 | `DEFAULT_BASE_URL` | 默认平台根地址常量 |
-| `build_query(query, *, is_china=False, is_domain=False)` | 纯查询构造器，必加蜜罐排除，返回 str |
+| `build_query(query, *, is_china=False, is_domain=False)` | 纯查询构造器，必加蜜罐/涉黄/涉赌排除，返回 str |
 | `query_from_icon(path=None, *, url=None, timeout=30, proxy=None)` | 恰好一个图标来源，返回原始 `web.icon` 条件 |
 | `query_from_certificate(url, *, timeout=30, proxy=None)` | HTTPS 叶子 DER MD5，返回原始 `cert.md5` 条件 |
 | `find_key_file()` | 返回第一份默认文件 Path 或 None |

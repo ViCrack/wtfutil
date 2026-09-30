@@ -43,7 +43,7 @@ class TestPublicApiContract(unittest.TestCase):
                     'query_from_icon', 'query_from_certificate'}
         self.assertEqual(set(daydaymaputil.__all__), expected)
         self.assertEqual(daydaymap.__all__, ['main'])
-        self.assertEqual(daydaymaputil.build_query('x'), '(x) && ip.tag!="蜜罐"')
+        self.assertEqual(daydaymaputil.build_query('x'), '(x) && ip.tag!="蜜罐" && ip.tag!="涉黄" && ip.tag!="涉赌"')
 
     def test_every_exported_symbol_exists_and_is_unique(self) -> None:
         for module_name in PUBLIC_MODULE_NAMES:

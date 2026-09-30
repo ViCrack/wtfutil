@@ -98,7 +98,7 @@ _EPILOG = """常见查询语法示例（查询值需用英文双引号，不区�
 
 def _parser():
     parser = argparse.ArgumentParser(
-        prog='daydaymap', description='默认搜索，--count 计数；免费聚合优先，强制排除平台已标记蜜罐。',
+        prog='daydaymap', description='默认搜索，--count 计数；免费聚合优先，强制排除平台已标记蜜罐、涉黄、涉赌。',
         epilog=_EPILOG,
         formatter_class=argparse.RawDescriptionHelpFormatter,
         allow_abbrev=False,

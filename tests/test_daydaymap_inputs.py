@@ -18,19 +18,20 @@ from tests.test_daydaymap import ClientCase, FakeSession, agg, error, page, row
 class TestQueryRules(ClientCase):
     def test_builder_wraps_or_and_always_excludes_honeypots(self):
         self.assertTrue(callable(getattr(sdk, 'build_query', None)), 'missing query builder')
-        self.assertEqual(sdk.build_query(' a || b '), '(a || b) && ip.tag!="蜜罐"')
+        self.assertEqual(sdk.build_query(' a || b '),
+                         '(a || b) && ip.tag!="蜜罐" && ip.tag!="涉黄" && ip.tag!="涉赌"')
         # Text inside a quoted value must not disable the mandatory exclusion.
         query = sdk.build_query('web.title="ip.tag!=\\\"蜜罐\\\""')
-        self.assertTrue(query.endswith(' && ip.tag!="蜜罐"'))
+        self.assertTrue(query.endswith(' && ip.tag!="蜜罐" && ip.tag!="涉黄" && ip.tag!="涉赌"'))
 
     def test_optional_filters_apply_to_count_fallback_and_all_pages(self):
         client = self.make_client(api=[page([row(1)], 2)], web=[error(2006)], max_retries=0)
         result = client.count('a || b', is_china=True, is_domain=True)
         queries = [base64.b64decode(c['json']['keyword']).decode() for c in self.web.calls + self.api.calls]
         self.assertEqual(queries, [result.query, result.query])
-        for clause in ('ip.tag!="蜜罐"', 'ip.country="CN"', 'ip.province!="台湾"',
-                       'ip.province!="香港"', 'ip.province!="澳门"', 'ip.city!="香港"',
-                       'ip.city!="澳门"', 'is_domain="true"'):
+        for clause in ('ip.tag!="蜜罐"', 'ip.tag!="涉黄"', 'ip.tag!="涉赌"', 'ip.country="CN"',
+                       'ip.province!="台湾"', 'ip.province!="香港"', 'ip.province!="澳门"',
+                       'ip.city!="香港"', 'ip.city!="澳门"', 'is_domain="true"'):
             self.assertIn(clause, result.query)
         client = self.make_client(api=[error(2004), page([row(1)], 2), page([row(2)], 2)], web=[agg(2)])
         self.assertEqual(len(list(client.search('a || b', is_china=True, is_domain=True, page_size=1))), 2)
@@ -46,13 +47,13 @@ class TestQueryRules(ClientCase):
                 self.assertEqual(next(iterator), row(1))
                 self.assertEqual(len(events), 1)
                 self.assertEqual(events[0]['total'], 1)
-                self.assertEqual(events[0]['query'], '(x) && ip.tag!="蜜罐"')
+                self.assertEqual(events[0]['query'], '(x) && ip.tag!="蜜罐" && ip.tag!="涉黄" && ip.tag!="涉赌"')
                 self.assertEqual(len(self.api.calls), 1)
                 iterator.close()
 
     def test_no_implicit_region_domain_or_ipv4_filter(self):
         client = self.make_client(web=[agg(1)])
-        self.assertEqual(client.count('x').query, '(x) && ip.tag!="蜜罐"')
+        self.assertEqual(client.count('x').query, '(x) && ip.tag!="蜜罐" && ip.tag!="涉黄" && ip.tag!="涉赌"')
 
 
 ICON = b'<svg xmlns="http://www.w3.org/2000/svg" width="1" height="1"></svg>'
@@ -222,7 +223,7 @@ class TestPipes(existing.KeyFileCase):
     def test_quoted_old_words_still_work_as_explicit_query(self):
         code, out, _ = self.invoke(['--count', '-q', 'count'], web=[agg(2)])
         self.assertEqual(code, 0)
-        self.assertEqual(json.loads(out)['query'], '(count) && ip.tag!="蜜罐"')
+        self.assertEqual(json.loads(out)['query'], '(count) && ip.tag!="蜜罐" && ip.tag!="涉黄" && ip.tag!="涉赌"')
 
     def test_count_rejects_every_explicit_search_option_before_output(self):
         output = self.work / 'existing.jsonl'
@@ -304,7 +305,8 @@ class TestPipes(existing.KeyFileCase):
             code, out, _ = self.invoke(['--count', '--template', 'domain="{}"'], web=[agg(1)])
         self.assertEqual(code, 0)
         escaped = value.replace('\\', '\\\\').replace('"', '\\"')
-        self.assertEqual(json.loads(out)['query'], '(domain="' + escaped + '") && ip.tag!="蜜罐"')
+        self.assertEqual(json.loads(out)['query'],
+                         '(domain="' + escaped + '") && ip.tag!="蜜罐" && ip.tag!="涉黄" && ip.tag!="涉赌"')
 
     def test_invalid_templates_preserve_output(self):
         output = self.work / 'existing.jsonl'

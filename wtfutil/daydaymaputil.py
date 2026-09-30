@@ -369,12 +369,15 @@ def _query(value):
     return value.strip()
 
 
+EXCLUDED_TAGS = ('蜜罐', '涉黄', '涉赌')
+
+
 def build_query(query: str, *, is_china: bool = False, is_domain: bool = False) -> str:
-    """Wrap a raw query and append mandatory honeypot and optional scope filters."""
+    """Wrap a raw query and append mandatory tag exclusions and optional scope filters."""
     query = _query(query)
     if not isinstance(is_china, bool) or not isinstance(is_domain, bool):
         raise ValueError('is_china 和 is_domain 必须为 bool。')
-    clauses = [f'({query})', 'ip.tag!="蜜罐"']
+    clauses = [f'({query})'] + [f'ip.tag!="{tag}"' for tag in EXCLUDED_TAGS]
     if is_china:
         clauses.extend(('ip.country="CN"', 'ip.province!="香港"', 'ip.province!="澳门"',
                         'ip.province!="台湾"', 'ip.city!="香港"', 'ip.city!="澳门"'))

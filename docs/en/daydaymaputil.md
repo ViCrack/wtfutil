@@ -1,6 +1,6 @@
 # wtfutil.daydaymaputil and the daydaymap CLI
 
-A Python SDK and streaming CLI for existing DayDayMap assets. Every public SDK `count` / `search` and CLI query excludes **honeypots already labelled by the platform**. This cannot identify or guarantee exclusion of unlabelled honeypots. Region, domain and IPv4 filters are otherwise off by default.
+A Python SDK and streaming CLI for existing DayDayMap assets. Every public SDK `count` / `search` and CLI query excludes **honeypots, pornography and gambling assets already labelled by the platform**. This cannot identify or guarantee exclusion of unlabelled assets. Region, domain and IPv4 filters are otherwise off by default.
 
 `daydaymaputil.py` contains the SDK, key pool, aggregate counts, pagination and splitting, plus the private icon/certificate transport. `daydaymap.py` exports only CLI `main`.
 
@@ -33,9 +33,9 @@ daydaymap --cert-url https://example.com:8443 --proxy http://127.0.0.1:8080
 daydaymap --query-file queries.txt --icon-file favicon.ico --key-file custom-keys.txt
 ```
 
-Search is the default; use `--count` for counts. Bare positional `search` / `count` are not accepted as queries; use `-q search` / `-q count` for those literal words. Honeypot exclusion applies to every query.
+Search is the default; use `--count` for counts. Bare positional `search` / `count` are not accepted as queries; use `-q search` / `-q count` for those literal words. Honeypot/pornography/gambling exclusion applies to every query.
 
-The SDK wraps raw `a || b` as `(a || b) && ip.tag!="蜜罐"`. `build_query()` previews or exports the complete condition. Pass raw queries to `count` / `search` rather than calling the builder first and wrapping twice.
+The SDK wraps raw `a || b` as `(a || b) && ip.tag!="蜜罐" && ip.tag!="涉黄" && ip.tag!="涉赌"`. `build_query()` previews or exports the complete condition. Pass raw queries to `count` / `search` rather than calling the builder first and wrapping twice.
 
 For PowerShell, UTF-8 files avoid version-dependent native argument quoting:
 
@@ -135,7 +135,7 @@ Before opening output, the CLI validates keys, options, all named query files an
 All public count/search entry points apply:
 
 ```text
-(raw query) && ip.tag!="蜜罐"
+(raw query) && ip.tag!="蜜罐" && ip.tag!="涉黄" && ip.tag!="涉赌"
 ```
 
 `--is-china` / `is_china=True` also adds:
@@ -179,7 +179,7 @@ Connect timeouts, 429 and 2006 have bounded retries. A 429 retries the same key 
 `--count` first calls anonymous `/api/v1/raymap/search/aggregate/query` without an API key. It takes the maximum sum across usable bucket dimensions, including an “other” bucket, always labelled **estimated**. `ip_num` is only `ip_count`, not an asset total. Empty/invalid buckets are not treated as zero.
 
 ```json
-{"query":"(domain=\"example.com\") && ip.tag!=\"蜜罐\"","total":100,"estimated":true,"source":"aggregate","ip_count":80}
+{"query":"(domain=\"example.com\") && ip.tag!=\"蜜罐\" && ip.tag!=\"涉黄\" && ip.tag!=\"涉赌\"","total":100,"estimated":true,"source":"aggregate","ip_count":80}
 ```
 
 Numbers are illustrative. When aggregation is unavailable and a key exists, both CLI and SDK `count()` automatically use `/api/v1/raymap/search/all` with `page=1,page_size=1,fields=ip` to obtain `data.total`, returning `estimated=false,source=api`. **This fallback may consume credits**, including discovered keys. Bad syntax and persistent rate limits do not trigger it. To ensure a count never makes a billed API request, construct the SDK client without keys, or run the CLI without keys (including no automatically discovered key file). Web aggregation behavior may change; billing, permissions and rate limits belong to the platform.
@@ -229,7 +229,7 @@ with DayDayMapClient.from_key_file(timeout=30, interval=0.5) as client:
 | Public API | Contract |
 |---|---|
 | `DEFAULT_BASE_URL` | Default platform root constant |
-| `build_query(query, *, is_china=False, is_domain=False)` | Pure builder, mandatory honeypot exclusion; returns str |
+| `build_query(query, *, is_china=False, is_domain=False)` | Pure builder, mandatory honeypot/pornography/gambling exclusion; returns str |
 | `query_from_icon(path=None, *, url=None, timeout=30, proxy=None)` | Exactly one image source; raw `web.icon` clause |
 | `query_from_certificate(url, *, timeout=30, proxy=None)` | HTTPS leaf DER MD5; raw `cert.md5` clause |
 | `find_key_file()` | First discovered Path or None |
