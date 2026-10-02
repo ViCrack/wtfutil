@@ -57,6 +57,7 @@ Get-Content -Encoding utf8 queries.txt | daydaymap --count
 | `QUERY` | 一个原始查询，使用模板时是待插值的值 |
 | `-q QUERY` / `--query QUERY` | 添加查询，可重复 |
 | `--count` | 只计数，免费聚合优先；有 Key 时可能付费回退。显式搜索专用参数与此选项组合会在请求前报错 |
+| `--jobs N` | 并发计数线程数 1..10，默认 4；仅 `--count` 模式，输出仍按输入顺序 |
 | `--query-file FILE` | UTF-8 文件，一行一条，可重复；`-` 表示 stdin |
 | `--template TEMPLATE` | 如 `domain="{}"`，占位符只能位于双引号内 |
 | `--icon-file FILE` / `--icon-url URL` | 本地图标 / HTTP(S) 图片直链，互斥 |
@@ -81,7 +82,9 @@ Get-Content -Encoding utf8 queries.txt | daydaymap --count
 | `--max-effort-depth N` | 每条查询最多子查询数，1..1000，默认 10；不是递归深度 |
 | `-h` / `--help` | 显示帮助与常见查询语法示例 |
 
-只允许搜索模式显式使用 `--fields`、`--exclude-fields`、`--page-size`、`--page`、`--limit`、`--max-effort`、`--max-effort-depth`、`--format` 和 `--quiet`；`--count` 与这些参数组合会在读取 Key 或打开输出文件前报错。`--max-effort-depth` 需要同时启用 `--max-effort`。启用 `--max-effort` 时，`--page` 与 `--page-size` 被忽略，分页由拆分策略自行控制。未显式提供这些参数时，搜索采用上表所列默认值。
+只允许搜索模式显式使用 `--fields`、`--exclude-fields`、`--page-size`、`--page`、`--limit`、`--max-effort`、`--max-effort-depth`、`--format` 和 `--quiet`；`--count` 与这些参数组合会在读取 Key 或打开输出文件前报错。`--max-effort-depth` 需要同时启用 `--max-effort`。启用 `--max-effort` 时，`--page` 与 `--page-size` 被忽略，分页由拆分策略自行控制。`--jobs` 仅计数模式有效，搜索模式显式指定会报错。未显式提供这些参数时，搜索采用上表所列默认值。
+
+计数模式默认 4 线程并发（`--jobs` 可调，上限 10）：工作线程只发请求，主线程按输入顺序写结果，读取最多提前 `--jobs` 条，不等待 EOF。`--jobs 1` 恢复严格逐条执行。并发共享同一全局请求间隔（`--interval`），Key 池与当日耗尽缓存均为线程安全。
 
 ## 常见查询语法
 

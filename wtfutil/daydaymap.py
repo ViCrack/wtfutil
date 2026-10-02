@@ -8,7 +8,10 @@ import io
 import json
 import math
 import os
+import queue
 import sys
+import threading
+from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 from contextlib import ExitStack
 from itertools import chain
 from pathlib import Path
@@ -106,6 +109,8 @@ def _parser():
     parser.add_argument('query_pos', nargs='?', metavar='QUERY', help='原始查询语句或模板输入值')
     parser.add_argument('-q', '--query', action='append', default=[], help='查询语句，可重复')
     parser.add_argument('--count', action='store_true', help='只计数：免费聚合优先，失败且有 Key 时可回退 API（可能扣积分）')
+    parser.add_argument('--jobs', type=_int_range(1, 10), metavar='N',
+                        help='并发计数线程数 1..10（默认 4；仅 --count 模式，输出仍按输入顺序）')
     parser.add_argument('--query-file', action='append', default=[], metavar='FILE', help='UTF-8 文件，一行一条；- 读取 stdin，可重复')
     parser.add_argument('--template', help='如 domain="{}"；{} 必须位于双引号内，输入值自动转义')
     parser.add_argument('--key-file', action='append', default=[], metavar='FILE',
@@ -147,7 +152,10 @@ def _validate_mode(args):
         invalid = [name for name in search_only if getattr(args, name) is not None]
         if invalid:
             raise ValueError('--count 不能与搜索专用参数同时使用：' + ', '.join(invalid))
+        args.jobs = 4 if args.jobs is None else args.jobs
     else:
+        if args.jobs is not None:
+            raise ValueError('--jobs 仅 --count 计数模式有效。')
         if args.max_effort_depth is not None and not args.max_effort:
             raise ValueError('--max-effort-depth 需要同时启用 --max-effort。')
         args.limit = 10000 if args.limit is None else args.limit
@@ -373,6 +381,55 @@ def _search_kwargs(args):
                 limit=args.limit, max_effort=args.max_effort, max_effort_depth=args.max_effort_depth)
 
 
+def _count_all(client, queries, filters, jobs, emit):
+    """并发计数：工作线程只查询，主线程按输入顺序输出，读取最多提前 jobs 条。"""
+    if jobs <= 1:
+        for query in queries:
+            emit(client.count(query, **filters).to_dict())
+        return
+    work = queue.Queue(maxsize=jobs * 2)
+    done_sentinel = object()
+
+    def reader():
+        try:
+            for query in queries:
+                work.put(query)
+        except BaseException as exc:
+            work.put(exc)
+        else:
+            work.put(done_sentinel)
+
+    threading.Thread(target=reader, daemon=True).start()
+    pending = {}
+    results = {}
+    next_index = next_emit = 0
+    reading = True
+    with ThreadPoolExecutor(max_workers=jobs) as executor:
+        while True:
+            while reading and len(pending) < jobs:
+                try:
+                    item = work.get(timeout=0.05)
+                except queue.Empty:
+                    break
+                if item is done_sentinel:
+                    reading = False
+                elif isinstance(item, BaseException):
+                    raise item
+                else:
+                    pending[executor.submit(client.count, item, **filters)] = next_index
+                    next_index += 1
+            if not pending:
+                if not reading:
+                    break
+                continue
+            finished, _ = wait(tuple(pending), timeout=0.05, return_when=FIRST_COMPLETED)
+            for future in finished:
+                results[pending.pop(future)] = future.result().to_dict()
+            while next_emit in results:
+                emit(results.pop(next_emit))
+                next_emit += 1
+
+
 def _exit_code(exc):
     if exc.reason in ('no_keys', 'invalid_query'):
         return 2
@@ -439,13 +496,19 @@ def main(argv: list[str] | None = None) -> int:
             status = 0
             filters = dict(is_china=args.is_china, is_domain=args.is_domain)
             on_count = None if args.quiet else lambda result: _json({'type': 'count', **result.to_dict()}, sys.stderr)
+
+            def combine(query):
+                if not sources:
+                    return query
+                clauses = ([query] if query is not None else []) + sources
+                return ' && '.join(f'({clause})' for clause in clauses)
+
+            if args.count:
+                _count_all(client, (combine(q) for q in chain([first], queries)), filters, args.jobs,
+                           lambda data: _emit(data, stream, seen=seen, needs_break=needs_break))
+                return status
             for query in chain([first], queries):
-                if sources:
-                    clauses = ([query] if query is not None else []) + sources
-                    query = ' && '.join(f'({clause})' for clause in clauses)
-                if args.count:
-                    _emit(client.count(query, **filters).to_dict(), stream, seen=seen, needs_break=needs_break)
-                    continue
+                query = combine(query)
                 iterator = client.search(query, **_search_kwargs(args), **filters, on_count=on_count)
                 broken = False
                 try:

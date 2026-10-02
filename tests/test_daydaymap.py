@@ -78,6 +78,27 @@ class FakeSession:
         self.closed = True
 
 
+class BarrierSession:
+    """Posts block until `parties` concurrent calls arrive; proves real concurrency."""
+
+    def __init__(self, parties, responses):
+        self.barrier = threading.Barrier(parties)
+        self.responses = list(responses)
+        self.calls = []
+        self.lock = threading.Lock()
+        self.closed = False
+
+    def post(self, url, **kwargs):
+        with self.lock:
+            self.calls.append({'url': url, **kwargs})
+        self.barrier.wait(timeout=10)
+        with self.lock:
+            return self.responses.pop(0)
+
+    def close(self):
+        self.closed = True
+
+
 class ClientCase(unittest.TestCase):
     def make_client(self, api=(), web=(), keys=('example-a', 'example-b'), key_cache=False, **kwargs):
         self.api = FakeSession(api)
@@ -528,8 +549,8 @@ class TestSearch(ClientCase):
 class TestCLI(KeyFileCase):
     def invoke(self, argv, *, api=(), web=(), environ=None):
         from wtfutil.daydaymap import main
-        self.api = FakeSession(api)
-        self.web = FakeSession(web)
+        self.api = api if hasattr(api, 'post') else FakeSession(api)
+        self.web = web if hasattr(web, 'post') else FakeSession(web)
         stdout, stderr = io.StringIO(), io.StringIO()
         with mock.patch.dict(os.environ, environ or {}, clear=True), \
                 mock.patch('wtfutil.daydaymaputil.requests_session', side_effect=[self.api, self.web]), \
@@ -546,6 +567,37 @@ class TestCLI(KeyFileCase):
         self.assertEqual(json.loads(out)['total'], 9)
         self.assertEqual(self.api.calls, [])
         self.assertNotIn('example-a', err)
+
+    def test_count_jobs_rejected_in_search_mode(self):
+        code, out, err = self.invoke(['x', '--jobs', '4'], environ={'DAYDAYMAP_API_KEY': 'example-a'})
+        self.assertEqual(code, 2)
+        self.assertEqual(out, '')
+        self.assertIn('invalid_argument', err)
+        self.assertEqual(self.api.calls + self.web.calls, [])
+
+    def test_count_jobs_out_of_range(self):
+        for value in ('0', '11'):
+            with self.subTest(value=value):
+                code, _, _ = self.invoke(['--count', 'x', '--jobs', value])
+                self.assertEqual(code, 2)
+                self.assertEqual(self.api.calls + self.web.calls, [])
+
+    def test_count_jobs_run_concurrently_and_output_stays_ordered(self):
+        web = BarrierSession(4, [agg(1), agg(2), agg(3), agg(4)])
+        code, out, err = self.invoke(
+            ['--count', '-q', 'q1', '-q', 'q2', '-q', 'q3', '-q', 'q4', '--jobs', '4', '--interval', '0'],
+            web=web)
+        self.assertEqual(code, 0)
+        self.assertEqual(err, '')
+        self.assertEqual([json.loads(line)['query'] for line in out.splitlines()],
+                         [filtered('q1'), filtered('q2'), filtered('q3'), filtered('q4')])
+        self.assertEqual(len(web.calls), 4)
+
+    def test_count_jobs_one_keeps_sequential_order(self):
+        code, out, _ = self.invoke(['--count', '-q', 'x', '-q', 'y', '--jobs', '1', '--interval', '0'],
+                                   web=[agg(2), agg(3)])
+        self.assertEqual(code, 0)
+        self.assertEqual([json.loads(line)['total'] for line in out.splitlines()], [2, 3])
 
     def test_query_and_key_files_bom_and_deduplication(self):
         with tempfile.TemporaryDirectory() as directory:

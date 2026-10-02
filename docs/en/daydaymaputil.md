@@ -57,6 +57,7 @@ Usage: `daydaymap [QUERY] [options]`. Search is the default; `--count` outputs c
 | `QUERY` | One raw query, or a value when using a template |
 | `-q QUERY` / `--query QUERY` | Additional query; repeatable |
 | `--count` | Count only; free aggregate first, API fallback may charge with keys. Explicit search-only options fail before requests |
+| `--jobs N` | Concurrent count threads, 1..10; default 4; `--count` mode only, output stays in input order |
 | `--query-file FILE` | UTF-8, one query per line; repeatable; `-` means stdin |
 | `--template TEMPLATE` | E.g. `domain="{}"`; placeholders must be inside double quotes |
 | `--icon-file FILE` / `--icon-url URL` | Local icon / direct HTTP(S) image URL; mutually exclusive |
@@ -81,7 +82,7 @@ Usage: `daydaymap [QUERY] [options]`. Search is the default; `--count` outputs c
 | `--max-effort-depth N` | Maximum child queries, 1..1000; default 10, not recursion depth |
 | `-h` / `--help` | Show help and query syntax examples |
 
-Explicit `--fields`, `--exclude-fields`, `--page-size`, `--page`, `--limit`, `--max-effort`, `--max-effort-depth`, `--format` and `--quiet` belong to search only; pairing them with `--count` fails before reading keys or opening output. `--max-effort-depth` also requires `--max-effort`. When `--max-effort` is enabled, `--page` and `--page-size` are ignored and pagination is controlled by the partitioning strategy. If these options are omitted, search uses the defaults listed above.
+Explicit `--fields`, `--exclude-fields`, `--page-size`, `--page`, `--limit`, `--max-effort`, `--max-effort-depth`, `--format` and `--quiet` belong to search only; pairing them with `--count` fails before reading keys or opening output. `--max-effort-depth` also requires `--max-effort`. When `--max-effort` is enabled, `--page` and `--page-size` are ignored and pagination is controlled by the partitioning strategy. `--jobs` belongs to count mode only; using it in search mode fails before requests. If these options are omitted, search uses the defaults listed above.
 
 ## Common query syntax
 

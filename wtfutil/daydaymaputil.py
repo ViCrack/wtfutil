@@ -600,6 +600,7 @@ class DayDayMapClient:
                 self._session.close()
             raise
         self._request_lock = Lock()
+        self._cache_lock = Lock()
         self._last_request: float | None = None
         self.last_summary: DayDayMapSearchSummary | None = None
         self._closed = False
@@ -659,8 +660,9 @@ class DayDayMapClient:
                         if delay > 0:
                             time.sleep(delay)
                     self._last_request = time.monotonic()
-                    response = session.post(DEFAULT_BASE_URL + path, headers=headers, json=payload,
-                                            timeout=self.timeout, allow_redirects=False)
+                # 锁只约束请求起始间隔；网络调用在锁外执行，多线程计数可以真正并发。
+                response = session.post(DEFAULT_BASE_URL + path, headers=headers, json=payload,
+                                        timeout=self.timeout, allow_redirects=False)
             except ConnectTimeout:
                 transient = 'network_error'
             except RequestException:
@@ -742,11 +744,12 @@ class DayDayMapClient:
         """把当日耗尽的 Key 摘要写入缓存；写失败静默忽略。"""
         if self._key_cache is None:
             return
-        digests = _load_exhausted_digests(self._key_cache)
-        digest = _key_digest(key)
-        if digest not in digests:
-            digests.add(digest)
-            _save_exhausted_digests(self._key_cache, digests)
+        with self._cache_lock:
+            digests = _load_exhausted_digests(self._key_cache)
+            digest = _key_digest(key)
+            if digest not in digests:
+                digests.add(digest)
+                _save_exhausted_digests(self._key_cache, digests)
 
     def count(self, query: str, *, is_china: bool = False,
               is_domain: bool = False) -> DayDayMapCount:

@@ -281,7 +281,7 @@ class TestPipes(existing.KeyFileCase):
                 yield 'y\n'
                 yield 'x\n'
         with mock.patch('sys.stdin', Input()):
-            code, out, _ = self.invoke(['--count', '--interval', '0'], web=[agg(2), agg(3)])
+            code, out, _ = self.invoke(['--count', '--jobs', '1', '--interval', '0'], web=[agg(2), agg(3)])
         self.assertEqual(code, 0)
         self.assertEqual([json.loads(line)['total'] for line in out.splitlines()], [2, 3])
 
