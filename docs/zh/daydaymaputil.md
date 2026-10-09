@@ -74,7 +74,7 @@ Get-Content -Encoding utf8 queries.txt | daydaymap --count
 | `--quiet` | 仅搜索模式：隐藏计数预检和摘要，错误仍写 stderr |
 | `--fields LIST` | 搜索返回字段，逗号分隔，优先于排除字段 |
 | `--exclude-fields LIST` | 搜索排除字段，逗号分隔 |
-| `--page-size N` | 搜索页宽，1..500，默认 500；小于 `-l` 时自动收缩；`--max-effort` 时忽略（固定 500，仍受 `-l` 收缩） |
+| `--page-size N` | 搜索页宽，1..500，默认 100；大于 100 时单次按 100 发送；小于 `-l` 时自动收缩；`--max-effort` 时忽略（起步 100，仍受 `-l` 收缩） |
 | `--page N` | 只取指定页，不再翻页；`--max-effort` 时忽略 |
 | `-l N` / `--limit N` | 每条输入查询输出上限，默认 10000；0 无本地上限 |
 | `--format {jsonl,url}` | 搜索输出格式，默认 JSONL；计数始终 JSONL |

@@ -74,7 +74,7 @@ Usage: `daydaymap [QUERY] [options]`. Search is the default; `--count` outputs c
 | `--quiet` | Search only: hide pre-counts and summaries, not errors |
 | `--fields LIST` | Comma-separated search fields; overrides exclusions |
 | `--exclude-fields LIST` | Comma-separated search field exclusions |
-| `--page-size N` | Search page width, 1..500; default 500; shrunk to `-l` when smaller; ignored with `--max-effort` (fixed at 500, still shrunk by `-l`) |
+| `--page-size N` | Search page width, 1..500; default 100; widths above 100 are sent as 100; shrunk to `-l` when smaller; ignored with `--max-effort` (starts at 100, still shrunk by `-l`) |
 | `--page N` | Fetch only the given page without further pagination; ignored with `--max-effort` |
 | `-l N` / `--limit N` | Output cap per input query; default 10000; 0 removes the local cap |
 | `--format {jsonl,url}` | Search output; default JSONL; counts always use JSONL |

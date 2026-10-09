@@ -257,7 +257,7 @@ class TestKeys(KeyFileCase):
             self.assertNotIn('example-secret', str(caught.exception))
 
     def test_exhaustion_retries_same_request_with_next_key(self):
-        for code in (2001, 2003, 2004):
+        for code in (2001, 2003):
             with self.subTest(code=code):
                 client = self.make_client(api=[error(code), page([row(1)], 1)], web=[agg(1)])
                 self.assertEqual(list(client.search('x')), [row(1)])
@@ -266,12 +266,37 @@ class TestKeys(KeyFileCase):
                 self.assertEqual([call['json']['page'] for call in self.api.calls], [1, 1])
                 self.assertEqual(client.available_keys, 1)
 
+    def test_quota_shrinks_same_key_before_switching(self):
+        client = self.make_client(api=[error(2004), page([row(1)], 1)], web=[agg(1)])
+        self.assertEqual(list(client.search('x')), [row(1)])
+        used = [call['headers']['api-key'] for call in self.api.calls]
+        self.assertEqual(used[0], used[1])
+        self.assertEqual([call['json']['page_size'] for call in self.api.calls], [100, 50])
+        self.assertEqual([call['json']['page'] for call in self.api.calls], [1, 1])
+        self.assertEqual(client.available_keys, 2)
+
+    def test_wider_key_does_not_skip_rows_after_overlap(self):
+        # 先把一把 Key 降到 10 并取走 10 条，下一把 Key 用 100 条窗口盖住这段，再降回 10 时不能从超前的偏移继续。
+        narrow = page([row(n) for n in range(1, 11)], 110)
+        overlap = page([row(n) for n in range(1, 101)], 110)
+        tail = page([row(n) for n in range(101, 111)], 110)
+        with mock.patch('wtfutil.daydaymaputil.random.shuffle', lambda items: None):
+            client = self.make_client(
+                api=[error(2004), error(2004), narrow, overlap, tail],
+                web=[agg(110)],
+            )
+            self.assertEqual(len(list(client.search('x'))), 110)
+            self.assertEqual(
+                [(call['json']['page'], call['json']['page_size']) for call in self.api.calls],
+                [(1, 100), (1, 50), (1, 10), (1, 100), (11, 10)],
+            )
+
     def test_exhausted_pool_is_finite_and_does_not_retry_disabled_keys(self):
-        client = self.make_client(api=[error(2004), error(2004)], web=[agg()])
+        client = self.make_client(api=[error(2004)] * 6, web=[agg()])
         with self.assertRaises(DayDayMapError) as caught:
             list(client.search('x'))
         self.assertEqual(caught.exception.reason, 'quota_exhausted')
-        self.assertEqual(len(self.api.calls), 2)
+        self.assertEqual([call['json']['page_size'] for call in self.api.calls], [100, 50, 10, 100, 50, 10])
         self.assertEqual(client.available_keys, 0)
         self.assertNotIn('example-secret', str(caught.exception))
 
@@ -333,7 +358,7 @@ class TestKeyCache(ClientCase):
         self.assertIn(self.api.calls[0]['headers']['api-key'], ('example-a', 'example-b'))
 
     def test_quota_exhaustion_is_written_and_reused(self):
-        client = self.make_client(keys=('example-a',), api=[error(2004)], web=[agg(1)], key_cache=self.cache)
+        client = self.make_client(keys=('example-a',), api=[error(2004)] * 3, web=[agg(1)], key_cache=self.cache)
         with self.assertRaises(DayDayMapError) as caught:
             list(client.search('x'))
         self.assertEqual(caught.exception.reason, 'quota_exhausted')
@@ -361,14 +386,14 @@ class TestKeyCache(ClientCase):
 
     def test_unwritable_cache_never_breaks_requests(self):
         missing = self.cache.parent / 'missing' / 'cache.json'
-        client = self.make_client(keys=('example-a',), api=[error(2004)], web=[agg(1)], key_cache=missing)
+        client = self.make_client(keys=('example-a',), api=[error(2004)] * 3, web=[agg(1)], key_cache=missing)
         with self.assertRaises(DayDayMapError) as caught:
             list(client.search('x'))
         self.assertEqual(caught.exception.reason, 'quota_exhausted')
 
     def test_disabled_cache_skips_filtering_and_writing(self):
         self.write_cache(['example-a'])
-        client = self.make_client(keys=('example-a',), api=[error(2004)], web=[agg(1)], key_cache=False)
+        client = self.make_client(keys=('example-a',), api=[error(2004)] * 3, web=[agg(1)], key_cache=False)
         with self.assertRaises(DayDayMapError):
             list(client.search('x'))
         self.assertEqual(self.read_cache()['keys'], [hashlib.sha256(b'example-a').hexdigest()])
@@ -473,7 +498,7 @@ class TestSearch(ClientCase):
         client = self.make_client(api=[page([row(1)], 1)], web=[agg(1)])
         self.assertEqual(list(client.search('x', page_size=2, limit=0, max_effort=True)), [row(1)])
         self.assertEqual(self.api.calls[0]['json']['page'], 1)
-        self.assertEqual(self.api.calls[0]['json']['page_size'], 500)
+        self.assertEqual(self.api.calls[0]['json']['page_size'], 100)
 
     def test_limit_reduces_first_page_width(self):
         client = self.make_client(api=[page([row(1), row(2)], 10)], web=[agg(10)])
@@ -639,7 +664,7 @@ class TestCLI(KeyFileCase):
         self.assertEqual(code, 0)
         self.assertEqual(json.loads(out), row(1))
         self.assertEqual(self.api.calls[0]['json']['page'], 1)
-        self.assertEqual(self.api.calls[0]['json']['page_size'], 500)
+        self.assertEqual(self.api.calls[0]['json']['page_size'], 100)
 
     def test_page_fetches_only_requested_page(self):
         code, out, err = self.invoke(['x', '--page', '2', '--page-size', '1', '--interval', '0'],
@@ -670,7 +695,7 @@ class TestCLI(KeyFileCase):
 
     def test_cli_persists_and_reuses_daily_quota_cache(self):
         cache = self.home / '.daydaymap_exhausted_keys.json'
-        code, _, err = self.invoke(['x', '--interval', '0'], api=[error(2004)], web=[agg(1)],
+        code, _, err = self.invoke(['x', '--interval', '0'], api=[error(2004)] * 3, web=[agg(1)],
                                    environ={'DAYDAYMAP_API_KEY': 'example-a'})
         self.assertEqual(code, 3)
         stored = json.loads(cache.read_text(encoding='utf-8'))
@@ -683,7 +708,7 @@ class TestCLI(KeyFileCase):
 
     def test_cli_no_key_cache_disables_persistence(self):
         cache = self.home / '.daydaymap_exhausted_keys.json'
-        code, _, _ = self.invoke(['x', '--no-key-cache', '--interval', '0'], api=[error(2004)], web=[agg(1)],
+        code, _, _ = self.invoke(['x', '--no-key-cache', '--interval', '0'], api=[error(2004)] * 3, web=[agg(1)],
                                  environ={'DAYDAYMAP_API_KEY': 'example-a'})
         self.assertEqual(code, 3)
         self.assertFalse(cache.exists())

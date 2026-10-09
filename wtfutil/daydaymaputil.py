@@ -30,6 +30,8 @@ from .util import get_resource
 
 DEFAULT_BASE_URL = 'https://www.daydaymap.com'
 API_LIMIT = 10000
+# 单次超过这个阶梯时先收到 100。积分不够整页再降到 50、10；10 条仍不足才停用该 Key。
+_PAGE_BUDGETS = (100, 50, 10)
 _IDENTITY_FIELDS = ('ip', 'port', 'domain', 'protocol', 'url')
 _MESSAGES = {
     'no_keys': 'API 查询需要 Key，请提供 daydaymap_keys.txt、指定 Key 文件或环境变量。',
@@ -58,6 +60,21 @@ _MESSAGES = {
 _MAX_ICON_BYTES = 2 * 1024 * 1024
 _MAX_REDIRECTS = 5
 _PROXY_SCHEMES = ('http', 'https', 'socks5', 'socks5h')
+
+
+def _opening_page_size(page_size: int) -> int:
+    """新 Key 的起步条数。调用方要的更少时保持原样。"""
+    if page_size > _PAGE_BUDGETS[0]:
+        return _PAGE_BUDGETS[0]
+    return page_size
+
+
+def _smaller_page_budget(page_size: int) -> int | None:
+    """积分不够整页时的下一档。没有更小档时，这个 Key 当日耗尽。"""
+    for size in _PAGE_BUDGETS:
+        if size < page_size:
+            return size
+    return None
 
 
 class SourceError(RuntimeError):
@@ -601,6 +618,9 @@ class DayDayMapClient:
             raise
         self._request_lock = Lock()
         self._cache_lock = Lock()
+        self._page_size_lock = Lock()
+        # 同一把 Key 降档后保持该档，直到换 Key。换 Key 不继承上一把的页宽。
+        self._page_sizes: dict[str, int] = {}
         self._last_request: float | None = None
         self.last_summary: DayDayMapSearchSummary | None = None
         self._closed = False
@@ -713,13 +733,7 @@ class DayDayMapClient:
                    'Referer': DEFAULT_BASE_URL + '/searchResult?keyword=' + quote(keyword, safe='')}
         return self._post(self._web_session, '/api/v1/raymap/search/aggregate/query', payload, headers)
 
-    def _api(self, query, page_number, page_size, fields=(), exclude_fields=()):
-        payload = {'page': page_number, 'page_size': page_size,
-                   'keyword': base64.b64encode(query.encode('utf-8')).decode('ascii')}
-        if fields:
-            payload['fields'] = ','.join(fields)
-        elif exclude_fields:
-            payload['exclude_fields'] = ','.join(exclude_fields)
+    def _api(self, query, page_number, page_size, fields=(), exclude_fields=(), *, offset: int | None = None):
         while True:
             key = self._keys.acquire()
             if key is None:
@@ -728,15 +742,44 @@ class DayDayMapClient:
                     reason = 'quota_exhausted'
                 raise DayDayMapError(reason)
             try:
-                return self._post(self._session, '/api/v1/raymap/search/all', payload,
-                                  {'api-key': key, 'Content-Type': 'application/json', 'Accept': 'application/json'})
-            except DayDayMapError as exc:
-                if exc.code not in (2001, 2003, 2004):
-                    raise
-                self._disabled_codes.append(exc.code)
-                self._keys.discard(key)
-                if exc.code == 2004:
-                    self._mark_key_exhausted(key)
+                while True:
+                    with self._page_size_lock:
+                        size = self._page_sizes.get(key, _opening_page_size(page_size))
+                    if page_size < size:
+                        size = page_size
+                    page = page_number if offset is None else offset // size + 1
+                    payload = {'page': page, 'page_size': size,
+                               'keyword': base64.b64encode(query.encode('utf-8')).decode('ascii')}
+                    if fields:
+                        payload['fields'] = ','.join(fields)
+                    elif exclude_fields:
+                        payload['exclude_fields'] = ','.join(exclude_fields)
+                    try:
+                        data = self._post(
+                            self._session, '/api/v1/raymap/search/all', payload,
+                            {'api-key': key, 'Content-Type': 'application/json', 'Accept': 'application/json'},
+                        )
+                    except DayDayMapError as exc:
+                        if exc.code == 2004:
+                            smaller = _smaller_page_budget(size)
+                            if smaller is not None:
+                                with self._page_size_lock:
+                                    self._page_sizes[key] = smaller
+                                continue
+                        if exc.code in (2001, 2003, 2004):
+                            self._disabled_codes.append(exc.code)
+                            self._keys.discard(key)
+                            if exc.code == 2004:
+                                self._mark_key_exhausted(key)
+                                with self._page_size_lock:
+                                    self._page_sizes.pop(key, None)
+                            break
+                        raise
+                    if not isinstance(data, dict):
+                        raise DayDayMapError('invalid_response')
+                    copied = dict(data)
+                    copied['_requested_page_size'] = size
+                    return copied
             finally:
                 self._keys.release(key)
 
@@ -781,12 +824,16 @@ class DayDayMapClient:
                on_count=None) -> Iterator[dict]:
         """Stream rows; last_summary remains available even after partial failure.
 
-        A fixed page width is used throughout each child query. It is reduced
-        before the first page when the local limit is smaller. Short non-final
-        pages are reported as incomplete rather than silently skipping offsets.
-        With max_effort=True, page and page_size are ignored: the width is
-        fixed at 500 (still shrunk by limit) and pagination is driven by the
-        partitioning strategy.
+        The opening width is the requested size, capped at 100, and is reduced
+        before the first page when the local limit is smaller. If a key cannot
+        pay the page, that same key retries at 50 and then 10; a 2004 at 10
+        retires that key, and the next key starts again at the opening width.
+        A wider page that overlaps rows already kept does not move the covered
+        offset past the end of that page. Short non-final pages are reported
+        as incomplete rather than silently skipping offsets.
+        With max_effort=True, page and page_size are ignored: the width starts
+        at 100 (still shrunk by limit, and by a key that cannot pay the page)
+        and pagination is driven by the partitioning strategy.
         """
         query = build_query(query, is_china=is_china, is_domain=is_domain)
         if on_count is not None and not callable(on_count):
@@ -839,7 +886,7 @@ class DayDayMapClient:
                 remaining = limit - summary.returned if limit else API_LIMIT
                 if remaining <= 0:
                     break
-                width = min(page_size, remaining, API_LIMIT)
+                width = _opening_page_size(min(page_size, remaining, API_LIMIT))
                 if page is not None:
                     body = self._api(child, page, width, requested, wire_excluded)
                     rows = body.get('list')
@@ -855,9 +902,9 @@ class DayDayMapClient:
                     break
                 offset = 0
                 capped = False
-                for page_number in range(1, (API_LIMIT + width - 1) // width + 1):
+                while offset < API_LIMIT:
                     try:
-                        body = self._api(child, page_number, width, requested, wire_excluded)
+                        body = self._api(child, 1, width, requested, wire_excluded, offset=offset)
                     except DayDayMapError as exc:
                         if exc.reason != 'result_limit':
                             raise
@@ -865,17 +912,21 @@ class DayDayMapClient:
                         summary.reason = 'result_limit'
                         capped = True
                         break
+                    actual = _nonnegative_int(body.get('_requested_page_size')) or width
                     total = _nonnegative_int(body.get('total'))
                     items = body.get('list')
-                    if total is None or not isinstance(items, list) or len(items) > width or any(not isinstance(x, dict) for x in items):
+                    if total is None or not isinstance(items, list) or len(items) > actual or any(not isinstance(x, dict) for x in items):
                         raise DayDayMapError('invalid_response')
                     if child == query:
                         if on_count is not None and summary.total is None:
                             on_count(DayDayMapCount(query, total, False, 'api'))
                         summary.total = total
                         summary.estimated = False
-                    summary.fetched += len(items)
-                    usable = items[:max(0, API_LIMIT - offset)]
+                    page_start = (offset // actual) * actual
+                    fresh_from = max(0, offset - page_start)
+                    window_end = min(len(items), max(0, API_LIMIT - page_start))
+                    usable = items[fresh_from:window_end]
+                    summary.fetched += len(usable)
                     for item in usable:
                         if max_effort:
                             identity = _asset_identity(item)
@@ -888,12 +939,12 @@ class DayDayMapClient:
                         yield projected
                         if limit and summary.returned >= limit:
                             # Hitting a requested output count isn't truncation if it was the actual final row.
-                            complete = not used_split and offset + len(items) >= total and summary.returned >= total
+                            complete = not used_split and page_start + len(items) >= total and summary.returned >= total
                             summary.limit_reached = not complete
                             summary.truncated = summary.truncated or not complete
                             summary.reason = 'best_effort' if used_split else ('limit' if not complete else 'complete')
                             return
-                    offset += len(items)
+                    offset = page_start + len(items)
                     if offset >= total:
                         break
                     if offset >= API_LIMIT:
@@ -901,7 +952,7 @@ class DayDayMapClient:
                         summary.reason = 'result_limit'
                         capped = True
                         break
-                    if len(items) < width:
+                    if len(items) < actual:
                         raise DayDayMapError('incomplete_page')
                 if capped and max_effort and child == query and not used_split:
                     if data is None:
